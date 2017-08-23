@@ -1,0 +1,3 @@
+AUTOMAKE_OPTIONS=foreign  
+SUBDIRS=print_cmd_vars
+#ACLOCAL_AMFLAGS= -I m4
