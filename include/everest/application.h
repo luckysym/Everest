@@ -62,13 +62,22 @@ namespace everest
         ~Properties() {}
         
         size_t count() const { return m_container.size(); }
-        bool   exist() const;
+        
+        bool   exist(const char * name) const {
+            return m_container.find(Item{String(name)}) != m_container.end();
+        }
         
         Iterator begin() { return Iterator(m_container.begin()); }
         ConstIterator begin() const { return Iterator(m_container.begin());}
         
         Iterator end() { return Iterator(m_container.end());}
         ConstIterator end() const { return Iterator(m_container.end());}
+        
+        String get(const char *name) const {
+            Container::iterator it = m_container.find(Item{String(name)});
+            if ( it != m_container.end()) return it->value;
+            else return String();
+        }
         
         bool add(const char * name, const char *value) {
             Item itm;

@@ -22,5 +22,6 @@ LT_INIT()         # ÉùÃ÷Ê¹ÓÃlibtool
 AC_CONFIG_FILES([
     Makefile 
     samples/Makefile
-    samples/print_cmd_vars/Makefile])
+    samples/print_cmd_vars/Makefile
+    samples/echosvc/Makefile])
 AC_OUTPUT
