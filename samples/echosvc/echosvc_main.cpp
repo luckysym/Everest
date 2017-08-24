@@ -1,12 +1,14 @@
 #include <everest/application.h>
 #include <everest/socket.h>
+#include <errno.h>
+#include <string.h>
 
 namespace e = everest;
 namespace s = everest::sock;
 
 int echosvc_main(e::ApplicationContext & ctx);
 int run_sync_client(e::ApplicationContext & ctx);
-
+int run_sync_server(e::ApplicationContext & ctx);
 
 int main(int argc, char **argv) 
 {
@@ -31,7 +33,8 @@ int echosvc_main(e::ApplicationContext & ctx)
         }
     } else {
         if ( is_sync ) {
-            printf("[error] run sync server: unsupported\n");
+            printf("[info] run sync server\n");
+            return run_sync_server(ctx);
         } else {
             printf("[error] run async server: unsupported\n");
         }
@@ -40,13 +43,13 @@ int echosvc_main(e::ApplicationContext & ctx)
     return 0;
 }
 
-// Í¬²½¿Í»§¶Ë
+// åŒæ­¥å®¢æˆ·ç«¯
 int run_sync_client(e::ApplicationContext & ctx)
 {
     e::Properties & props = ctx.properties();
     e::String remote_addr = props.get("addr");
     e::String remote_port = props.get("port");
-    e::String count_str   = props.get("count");  // ·¢ËÍ´ÎÊı
+    e::String count_str   = props.get("count");  // å‘é€æ¬¡æ•°
     
     if ( remote_addr.empty() ) {
         printf("[error] --addr not specified\n");
@@ -80,7 +83,7 @@ int run_sync_client(e::ApplicationContext & ctx)
         printf("sent message: %s\n", buf);
         
         char rbuf[128];
-        ret = sock.recv(buf, 128);
+        ret = sock.recv(rbuf, 128);
         if ( ret < 0 ) {
             printf("[error] recv message failed, %d\n", i);
             break;
@@ -93,3 +96,63 @@ int run_sync_client(e::ApplicationContext & ctx)
     sock.close();
     return 0;
 } // end of run_sync_client()
+
+int run_sync_server(e::ApplicationContext &ctx)
+{
+    e::Properties & props = ctx.properties();
+    e::String addr = props.get("addr");
+    e::String port = props.get("port");
+    e::String backlog = props.get("backlog");
+    
+    if ( port.empty() ) {
+        printf("[error] --port not specified\n");
+        return -1;
+    }
+    
+    s::TcpAddress      address(addr.c_str(), atoi(port.c_str()));
+    s::TcpServerSocket servsock;
+    
+    bool isok = servsock.bind(address);
+    if ( !isok ) {
+        printf("[error] bind server socket failed: %s\n", strerror(errno));
+        return -1;
+    }
+    
+    int n_backlog = atoi(backlog.c_str());
+    if ( n_backlog == 0 ) n_backlog = 5;
+    isok = servsock.open(n_backlog);
+    if ( !isok ) {
+        printf("[error] open server socket failed, %s\n", strerror(errno));
+        return -1;
+    }
+    
+    while ( !ctx.signal_stop() ) {  // æ˜¯å¦æœ‰åœæ­¢ä¿¡å·
+        s::TcpAddress remote;
+        s::TcpSocket sock( servsock.accept(remote) );
+        if ( !sock.valid() ) break;
+        
+        while ( !ctx.signal_stop() ) {
+            char rbuf[128];
+            ssize_t ret = sock.recv(rbuf, 128);
+            if ( ret < 0 ) {
+                printf("[error] recv message failed\n");
+                break;
+            } else if ( ret == 0 ) {
+                printf("[info] remote closed\n");
+                break;
+            }
+            rbuf[ret] = '\0';
+            printf("recv message: %s\n", rbuf);
+            
+            ret = sock.send(rbuf, ret);
+            if ( ret < 0 ) {
+                printf("[error] send message failed\n");
+                break;
+            }
+            printf("sent message: %s\n", rbuf);
+        }
+    } // end while
+    
+    servsock.close();
+    return 0;
+} // end of run_sync_server()

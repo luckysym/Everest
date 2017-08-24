@@ -45,7 +45,11 @@ namespace everest
         return ;
     }
     
-    ApplicationContext :: ApplicationContext () {}
+    ApplicationContext :: ApplicationContext () 
+        : m_result(0)
+        , m_rsignals(0)
+    {}
+    
     ApplicationContext :: ~ApplicationContext() {}
     
 } // end of namespace everest 

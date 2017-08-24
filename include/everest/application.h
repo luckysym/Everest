@@ -100,8 +100,12 @@ namespace everest
     
     class ApplicationContext
     {
+    public:
+        static const int RSIG_STOP = 1;    // 收到停止信号
+        
     private:
-        int        m_result;      // �������н��ֵ
+        int        m_result;      // 程序运行结果值
+        int        m_rsignals;    // 收到的信号
         Properties m_props;
         
     public:
@@ -113,8 +117,9 @@ namespace everest
         
         int result() const { return m_result; }
         void result(int ret) { m_result = ret; }
+        
+        bool signal_stop() const  { return m_rsignals & RSIG_STOP; }   // 是否收到停止信号
     }; // end of ApplicationContext
-    
     
     class Application
     {
