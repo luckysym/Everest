@@ -84,6 +84,18 @@ namespace net
     protected:
         TcpBasicSocket() : BasicSocket(AF_INET, SOCK_STREAM, 0) { }
         TcpBasicSocket(int fd) : BasicSocket(fd) {}
+        
+    public:
+        InetAddress  local_addr() const {
+            InetAddress addr;
+            socklen_t len = addr.length();
+            ::getsockname(m_fd, (struct sockaddr*)addr.c_addr(), &len);
+            return addr;
+        }
+        
+        bool bind(const InetAddress &addr) {
+            return 0 == ::bind(m_fd, (const struct sockaddr*)addr.c_addr(), addr.length());
+        }
     }; // end of class TcpBasicSocket
     
     /**
@@ -99,7 +111,7 @@ namespace net
         
         TcpSocket(int fd) : TcpBasicSocket(fd) { }
         
-        const InetAddress & remote_addr() const { return m_raddr; }
+        InetAddress  remote_addr() const { return m_raddr; }
         
         bool open(const InetAddress & remote) {
             m_raddr = remote;
@@ -122,14 +134,10 @@ namespace net
         }
     }; // end of class TcpSocket
     
-    class TcpServerSocket : public BasicSocket
+    class TcpServerSocket : public TcpBasicSocket
     {
     public:
-        TcpServerSocket() : BasicSocket(AF_INET, SOCK_STREAM, 0) { }
-    
-        bool bind(const InetAddress &addr) {
-            return 0 == ::bind(m_fd, (const struct sockaddr*)addr.c_addr(), addr.length());
-        }
+        TcpServerSocket() { }
         
         bool open(int backlog) {
             return 0 == ::listen(m_fd, backlog);

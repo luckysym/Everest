@@ -138,8 +138,6 @@ namespace net
         
     }; // end of class EPoller 
     
-    
-    
 } // end of namespace net
 } // end of namespace everest
 
