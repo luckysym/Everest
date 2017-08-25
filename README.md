@@ -1,2 +1,10 @@
-# Everest
-C++ Microservices Framework
+# Everest - C++ Microservices Framework
+
+本项目代码目标实现一个C++微服务框架。主要功能将包括：
+1. 应用进程和线程管理。
+2. 业务组件对象和序列化。
+3. RPC远程过程调用。
+4. 服务注册和发现。
+5. 服务编制和编排。
+
+等等...
