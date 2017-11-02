@@ -16,7 +16,7 @@ namespace everest
 namespace net
 {
     /**
-     * @brief TcpAddreÀà£¬ÃèÊöTCPÍøÂçµØÖ·¡£
+     * @brief TcpAddreç±»ï¼Œæè¿°TCPç½‘ç»œåœ°å€ã€‚
      */
     class InetAddress
     {
@@ -48,7 +48,7 @@ namespace net
     }; // end of class InetAddress
     
     /**
-     * @brief SocketÀà¡£ËùÓĞSocketµÄ»ùÀà£¬Ìá¹©»ù±¾Í¨ÓÃµÄSocket²Ù×÷£¬Èç¾ä±ú¹ÜÀí¡£
+     * @brief Socketç±»ã€‚æ‰€æœ‰Socketçš„åŸºç±»ï¼Œæä¾›åŸºæœ¬é€šç”¨çš„Socketæ“ä½œï¼Œå¦‚å¥æŸ„ç®¡ç†ã€‚
      */
     class BasicSocket
     {
@@ -77,7 +77,7 @@ namespace net
     }; // end of class Socket
     
     /**
-     * @brief TcpBasicSocketÀà¡£Ê¹ÓÃTCP v4Ğ­ÒéµÄSocket»ùÀà£¬×ÓÀà°üÀ¨TcpSocketºÍTcpServerSocket.
+     * @brief TcpBasicSocketç±»ã€‚ä½¿ç”¨TCP v4åè®®çš„SocketåŸºç±»ï¼Œå­ç±»åŒ…æ‹¬TcpSocketå’ŒTcpServerSocket.
      */
     class TcpBasicSocket : public BasicSocket 
     {
@@ -99,7 +99,7 @@ namespace net
     }; // end of class TcpBasicSocket
     
     /**
-     * @brief TcpSocketÀà¡£Ö§³ÖTCP v4²Ù×÷¡£
+     * @brief TcpSocketç±»ã€‚æ”¯æŒTCP v4æ“ä½œã€‚
      */
     class TcpSocket : public TcpBasicSocket
     {

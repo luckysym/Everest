@@ -9,7 +9,7 @@ namespace everest
 {
 namespace net
 {
-    /// EPollEventÀà¡£epoll_event·â×°
+    /// EPollEventç±»ã€‚epoll_eventå°è£…
     class EPollEvent : public epoll_event
     {
     public:
@@ -26,7 +26,7 @@ namespace net
     }; // end of class EPollEvent
     
     /**
-     * @brief EPollerIteratorÀà¡£EpollerÊÂ¼şµü´úÆ÷¡£
+     * @brief EPollerIteratorç±»ã€‚Epolleräº‹ä»¶è¿­ä»£å™¨ã€‚
      */
     class EPollIterator : public std::vector<EPollEvent>::iterator
     {
@@ -39,7 +39,7 @@ namespace net
     }; // end of class EPollIterator
     
     /**
-     * @brief EPollerÀà¡£Linux epoll²Ù×÷Àà¡£
+     * @brief EPollerç±»ã€‚Linux epollæ“ä½œç±»ã€‚
      */
     class EPoller
     {
@@ -73,7 +73,7 @@ namespace net
         }
     
         bool add(int fd, int32_t events, void *param) {
-            // À©´óÉèÖÃÊÂ¼ş¿Õ¼ä£¬µ±eventsÊı×é³¤¶È²»×ãÊ±¡£
+            // æ‰©å¤§è®¾ç½®äº‹ä»¶ç©ºé—´ï¼Œå½“eventsæ•°ç»„é•¿åº¦ä¸è¶³æ—¶ã€‚
             if ( fd >= m_events.size() ) {
                 EPollEvent e;
                 e.reset();
@@ -110,7 +110,7 @@ namespace net
             return true;
         }
         
-        /// »ñÈ¡µÚÒ»¸öÉèÖÃµÄÊÂ¼ş
+        /// è·å–ç¬¬ä¸€ä¸ªè®¾ç½®çš„äº‹ä»¶
         Iterator begin() {
             std::vector<EPollEvent>::iterator it = m_events.begin();
             for( ; it != m_events.end(); ++it) {
@@ -121,17 +121,17 @@ namespace net
             return Iterator(it);
         }
         
-        /// »ñÈ¡ÉèÖÃµÄÊÂ¼şÁĞ±íÄ©Î²µü´úÆ÷
+        /// è·å–è®¾ç½®çš„äº‹ä»¶åˆ—è¡¨æœ«å°¾è¿­ä»£å™¨
         Iterator end() {
             return Iterator(m_events.end());
         }
         
-        /// »ñÈ¡µÚÒ»¸ö´¥·¢µÄÊÂ¼şµü´úÆ÷¡£
+        /// è·å–ç¬¬ä¸€ä¸ªè§¦å‘çš„äº‹ä»¶è¿­ä»£å™¨ã€‚
         Iterator rbegin() {
             return Iterator(m_revents.begin());
         }
         
-        /// »ñÈ¡´¥·¢µÄÊÂ¼şÁĞ±íµÄÄ©Î²
+        /// è·å–è§¦å‘çš„äº‹ä»¶åˆ—è¡¨çš„æœ«å°¾
         Iterator rend() {
             return Iterator(m_revents.end());
         }
