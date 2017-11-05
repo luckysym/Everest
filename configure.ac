@@ -8,6 +8,7 @@ AM_INIT_AUTOMAKE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
+
 # Checks for programs.
 AC_PROG_CXX
 
@@ -18,10 +19,10 @@ AC_PROG_CXX
 # Checks for typedefs, structures, and compiler characteristics.
 
 # Checks for library functions.
-LT_INIT()         # ÉùÃ÷Ê¹ÓÃlibtool
+LT_INIT()         # init libtool
 AC_CONFIG_FILES([
     Makefile 
-    samples/Makefile
-    samples/print_cmd_vars/Makefile
-    samples/echosvc/Makefile])
+    test/Makefile
+    test/net_aio/Makefile
+])
 AC_OUTPUT
