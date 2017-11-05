@@ -1,5 +1,6 @@
-AUTOMAKE_OPTIONS=foreign  
-SUBDIRS=. samples
+AUTOMAKE_OPTIONS=foreign subdir-objects
+#SUBDIRS=. samples
+SUBDIRS=. test
 ACLOCAL_AMFLAGS= -I m4
 
 
