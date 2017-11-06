@@ -80,22 +80,6 @@ inline bool BasicIoServiceT<F>::CloseServer(int objectId)
     }
 }
 
-template<class F>
-inline bool BasicIoServiceT<F>::CloseAll()
-{
-    for(int i = 0; i < m_vecObjects.size(); ++i) {
-        IoObject & obj = m_vecObjects[i];
-        if ( obj.type == Type_Server) {
-            obj.type = Type_Unknown;
-            m_pFactory->CloseServer(obj.data);
-        } else if (obj.type == Type_Channel) {
-            obj.type = Type_Unknown;
-            m_pFactory->CloseChannel(obj.data);
-        } 
-    }
-    return true;
-}
-
 } // end of namespace net
 } // end of namespace everest 
 

@@ -9,6 +9,21 @@ namespace everest
 {
 namespace net 
 {
+    class ConstBuffer
+    {
+    private:
+        const char * m_pBufferRef;
+        size_t       m_nLength;
+
+    public:
+        ConstBuffer(const char * buf, size_t len) 
+            : m_pBufferRef(buf), m_nLength(len) {}
+
+        ~ConstBuffer() { m_pBufferRef = nullptr; m_nLength = 0;}
+
+        size_t Length() const { return m_nLength; }
+    }; // end of class ConstBuffer
+
     template<class F>
     class BasicIoServiceT
     {
@@ -22,7 +37,7 @@ namespace net
         static const int    Type_Server  = 2;
         static const size_t Default_Max_Size = 1024;  // 默认最大允许的IO对象实例数
 
-    private:
+    protected:
         struct IoObject
         {
             int          type;    // 0-channel, 1-server
@@ -46,17 +61,36 @@ namespace net
 
         bool CloseChannel(int id);
         bool CloseServer(int id);
-        bool CloseAll();
+
+    protected:
+        IoObject * GetIoObject(int id) {
+            if ( id >= 0 && id < m_vecObjects.size()) 
+                return &m_vecObjects[id];
+            else
+                return nullptr;
+        }
 
     }; // end of BasicIoServiceT
     
     // 异步I/O服务
-    template<class F, class T >
+    template<class F, class E >
     class AsyncIoServiceT : public BasicIoServiceT<F>
     {
+    public:
+        typedef BasicIoServiceT<F> BaseType;
+        typedef F IoFactory;
+        typedef E IoEventService;
+
+    private:
+        IoEventService * m_pEvent;
+
     private:
         AsyncIoServiceT(const AsyncIoServiceT&);
         AsyncIoServiceT& operator=(const AsyncIoServiceT&);
+
+    public:
+        AsyncIoServiceT();
+        ~AsyncIoServiceT();
 
         // 向指定的channel异步发送指定长度的消息，返回这次异步任务的标识ID(>= 0)。
         // 异步任务创建失败则返回-1。函数返回并不表示发送成功。
@@ -139,6 +173,6 @@ namespace net
 } // end of namespace everest
 
 #include <everest/net/impl/basic_io_service.inl>
-
+#include <everest/net/impl/async_io_service.inl>
 
 #endif // INCLUDE_EVEREST_NET_IO_SERVICE_H

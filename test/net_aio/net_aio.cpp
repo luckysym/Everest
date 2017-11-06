@@ -1,13 +1,11 @@
 #include <iostream>
+#include <string.h>
 #include <everest/net/io_service.h>
 
 
-int g_result = 0;
-
 #define CHECK( x ) \
     do {\
-        g_result = (x)?0:-1; \
-        if ( g_result < 0 ) return g_result; \
+        if ( !(x) ) return -1; \
     } while (0) 
 
 class FakeFactory
@@ -55,9 +53,24 @@ private:
     int m_objectId;
 }; // end of 
 
+class FakeEventService
+{
+public:
+    FakeEventService() : m_taskId(0) {}
 
+    template<class ConstBuf>
+    int PostWrite(FakeFactory::IoObjectType obj, const ConstBuf& buf, int timeout)
+    {
+        using namespace std;
+        cout<<"FakeEventService::PostWrite: "<<obj<<", bufsize "<<buf.Length()<<", timeout "<<timeout<<endl;
+        return m_taskId++;
+    }
 
-int main(int argc, char **argv)
+private:
+    int m_taskId;
+}; // end of class FakeEventService
+
+int test_basic_iosvc_fake(int argc, char **argv)
 {
     using namespace everest::net;
 
@@ -73,5 +86,34 @@ int main(int argc, char **argv)
     isok = ioservice.CloseServer(serverId);
     CHECK(isok);
 
-    return g_result;
+    return 0;
+}
+
+int test_async_iosvc_fake(int argc, char **argv)
+{
+    using namespace everest::net;
+    using namespace std;
+    cout<<"test_async_iosvc_fake"<<endl;
+    const char * msg = "hello, world\n";
+    AsyncIoServiceT<FakeFactory, FakeEventService> ioservice;
+    
+    int channelId = ioservice.OpenChannel("192.168.1.1:80");
+    cout<<"\topen channel: "<<channelId<<endl;
+    CHECK(channelId >= 0);
+
+    int sendTaskId = ioservice.SendAsync(channelId, msg, strlen(msg), 5000);
+    CHECK(sendTaskId >= 0);
+    
+    ioservice.CloseChannel(channelId);
+    return 0;
+}
+
+
+
+
+int main(int argc, char **argv)
+{
+    CHECK( 0 == test_basic_iosvc_fake(argc, argv) );
+    CHECK( 0 == test_async_iosvc_fake(argc, argv) );
+    return 0;
 }
