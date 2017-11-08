@@ -2,6 +2,7 @@
 #include <string.h>
 #include <everest/net/io_service.h>
 
+namespace en = everest::net;
 
 #define CHECK( x ) \
     do {\
@@ -62,15 +63,27 @@ public:
     int PostWrite(FakeFactory::IoObjectType obj, const ConstBuf& buf, int timeout)
     {
         using namespace std;
-        cout<<"FakeEventService::PostWrite: "<<obj<<", bufsize "<<buf.Length()<<", timeout "<<timeout<<endl;
+        cout<<"FakeEventService::PostWrite(1): "<<obj<<", bufsize "<<buf.Length()<<", timeout "<<timeout<<endl;
         return m_taskId++;
+    }
+
+    template<class FnSendComplete, class ConstBuf>
+    int PostWrite(FakeFactory::IoObjectType obj,FnSendComplete fnComplete, void *arg)
+    {
+        using namespace std;
+        cout<<"FakeEventService::PostWrite(2): "<<obj<<endl;
+        ConstBuf buf;
+        int newTaskId = m_taskId++;
+        int ret = fnComplete(newTaskId, buf, 0, arg);
+        cout<<"FakeEventService::PostWrite(2): "<<ret<<endl;
+        return newTaskId;
     }
 
 private:
     int m_taskId;
 }; // end of class FakeEventService
 
-int test_basic_iosvc_fake(int argc, char **argv)
+static int test_basic_iosvc_fake(int argc, char **argv)
 {
     using namespace everest::net;
 
@@ -89,7 +102,7 @@ int test_basic_iosvc_fake(int argc, char **argv)
     return 0;
 }
 
-int test_async_iosvc_fake(int argc, char **argv)
+static int test_async_iosvc_fake(int argc, char **argv)
 {
     using namespace everest::net;
     using namespace std;
@@ -103,7 +116,8 @@ int test_async_iosvc_fake(int argc, char **argv)
 
     int sendTaskId = ioservice.SendAsync(channelId, msg, strlen(msg), 5000);
     CHECK(sendTaskId >= 0);
-    
+
+   
     ioservice.CloseChannel(channelId);
     return 0;
 }

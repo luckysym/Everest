@@ -16,13 +16,68 @@ namespace net
         size_t       m_nLength;
 
     public:
+        ConstBuffer() : m_pBufferRef(nullptr), m_nLength(0) {}
+
         ConstBuffer(const char * buf, size_t len) 
-            : m_pBufferRef(buf), m_nLength(len) {}
+            : m_pBufferRef(buf)
+            , m_nLength(len) {}
+
+        ConstBuffer(const ConstBuffer& cBuffer) 
+            : m_pBufferRef(cBuffer.m_pBufferRef)
+            , m_nLength(cBuffer.m_nLength) {}
 
         ~ConstBuffer() { m_pBufferRef = nullptr; m_nLength = 0;}
+        
+        ConstBuffer & operator= (const ConstBuffer& cBuffer) {
+            if ( this == &cBuffer ) return *this;
+            m_pBufferRef = cBuffer.m_pBufferRef;
+            m_nLength = cBuffer.m_nLength;
+            return *this;
+        }
 
         size_t Length() const { return m_nLength; }
+        const char * Ptr() const { return m_pBufferRef; }
+
     }; // end of class ConstBuffer
+
+    class MutableBuffer
+    {
+    private:
+        char * m_pBufferRef;
+        size_t m_nCapacity;    // 缓存总长
+        size_t m_nLength;      // 有效数据长度
+
+    public:
+        MutableBuffer(char * buf, size_t capacity, size_t len = 0 ) 
+            : m_pBufferRef(buf)
+            , m_nCapacity(capacity)
+            , m_nLength(len) {}
+
+        MutableBuffer(const MutableBuffer& cBuffer) 
+            : m_pBufferRef(cBuffer.m_pBufferRef)
+            , m_nCapacity(cBuffer.m_nCapacity)
+            , m_nLength(cBuffer.m_nLength) {}
+
+        ~MutableBuffer() {
+            m_pBufferRef = nullptr; 
+            m_nCapacity = 0; 
+            m_nLength = 0; 
+        }
+
+        MutableBuffer & operator= (const MutableBuffer& cBuffer) {
+            if ( this == &cBuffer ) return *this;
+            m_pBufferRef = cBuffer.m_pBufferRef;
+            m_nCapacity = cBuffer.m_nCapacity;
+            m_nLength = cBuffer.m_nLength;
+            return *this;
+        }
+
+        size_t Capacity() const { return m_nCapacity; }
+        size_t Length() const { return m_nLength; }
+        char * Ptr() const { return m_pBufferRef; }
+
+    }; // end of class MutableBuffer
+
 
     template<class F>
     class BasicIoServiceT
@@ -72,6 +127,9 @@ namespace net
 
     }; // end of BasicIoServiceT
     
+    typedef int (*PFN_SEND_COMPLETE)(int taskId, ConstBuffer *pBuffer, int state, void *arg);
+    typedef int (*PFN_RECV_COMPLETE)(int taskId, MutableBuffer pcBuffer, int state, void *arg);
+
     // 异步I/O服务
     template<class F, class E >
     class AsyncIoServiceT : public BasicIoServiceT<F>
@@ -96,23 +154,13 @@ namespace net
         // 异步任务创建失败则返回-1。函数返回并不表示发送成功。
         int SendAsync(int channelId, const char * buf, size_t length, int timeout);
         
-        // 向指定的channel异步发送消息。但消息的内容、超时时间由函数Fn确定，返回这次异步任务的标识ID(>= 0)。
-        // 异步任务创建失败则返回-1。函数返回并不表示发送成功。函数fn可能被其他线程所调用，视具体实现而定
-        template<typename SFn>
-        int SendAsync(int channelId, SFn fn);
-        
         // 从指定的channel异步接收指定长度的消息，返回这次异步任务的标识ID(>= 0)。
         // 异步任务创建失败则返回-1。函数返回并不表示接收成功。
         int ReceiveAsync(int channelId, char * buf, size_t length, int timeout);
                 
-        // 从指定channel异步接收消息，接收消息的长度和超时时间，由函数Fn确定。返回这次异步任务的标识ID(>= 0)。
-        // 异步任务创建失败则返回-1。函数返回并不表示接收成功。函数fn可能被其他线程所调用，视具体实现而定
-        template<typename RFn>
-        int ReceiveAsync(int channelId, RFn fn);
+        // 从指定的channel异步接收任意长度的消息（最大长度由length确定，或直至超时），返回这次异步任务的标识ID。
+        int ReceiveSomeAsync(int channelId, char * buf, size_t length, int timeout);
         
-        // 从指定的server异步获取一个连入的Channel，返回此异步任务的ID(>=0). 任务创建失败返回-1.
-        int AcceptAsync(int serverId);
-
         // 等待异步时间完成，返回已完成的异步时间数，同时输出完成的异步任务ID列表。
         int Wait(int *taskIds, int len);
         
