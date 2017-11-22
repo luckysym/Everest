@@ -20,12 +20,12 @@ class FakeIoService
 {
 public:
     template<class Buf>
-    ssize_t PostRead(int channel, const Buf &buf, int timeout) {
+    int PostRead(int channel, const Buf &buf, int timeout) {
         return 0;
     }
 
     template<class Buf>
-    ssize_t PostWrite(int channel, const Buf &buf, int timeout) {
+    int PostWrite(int channel, const Buf &buf, int timeout) {
         return 0;
     }
 };
@@ -36,6 +36,7 @@ int test_client_model(int argc, char **argv)
     FakeChannelPool pool;
     FakeIoService   iosvc;
     en::ClientModel<FakeChannelPool, FakeIoService> client(pool, iosvc);
+    
     return 0;
 }
 

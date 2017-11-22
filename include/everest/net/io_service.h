@@ -102,20 +102,52 @@ namespace net
         ClientModel(ChannelPool &rChannelPool, IoService &rIoService);
         ~ClientModel();
 
-        ssize_t Send(int channelId, const char * buf, size_t length, int timeout);
-        ssize_t SendSome(int channelId, const char * buf, size_t length);
+        int Send(int channelId, const char * buf, int length, int timeout);
+        int SendSome(int channelId, const char * buf, int length);
 
-        ssize_t Receive(int channelId, char *buf, size_t length, int timeout);
-        ssize_t ReceiveSome(int channelId, char *buf, size_t length);
+        int Receive(int channelId, char *buf, int length, int timeout);
+        int ReceiveSome(int channelId, char *buf, int length);
 
+        int Wait(int *parrTaskIds, int * parrResults, int length);
     }; // end of class ClientModel
 
     /**
      * 网络通讯服务端模型
      */ 
+    template<class Lp, class Cp, class Io>
     class ServerModel
     {
+    private:
+        ServerModel(const ServerModel& );
+        ServerModel& operator=(const ServerModel& );
+
     public:
+        typedef Lp   ListenerPool;
+        typedef Cp   ChannelPool;
+        typedef Io   IoService;
+        typedef typename ChannelPool::ChannelType ChannelType;
+        typedef typename ListenerPool::ListenerType ListenerType;
+
+    public:
+        ListenerPool & m_rListenerPool;
+        ChannelPool  & m_rChannelPool;
+        IoService    & m_rIoService;
+
+    public:
+        ServerModel(ListenerPool &rListenerPool, 
+                    ChannelPool &rChannelPool, 
+                    IoService &rIoService);
+        ~ServerModel();
+
+        int Accept(int listenerId, ChannelType & rChannel);
+
+        int Send(int channelId, const char * buf, int length, int timeout);
+        int SendSome(int channelId, const char * buf, int length);
+
+        int Receive(int channelId, char *buf, int length, int timeout);
+        int ReceiveSome(int channelId, char *buf, int length);
+
+        int Wait(int *parrTaskIds, int * parrResults, int length);
     }; // end of class ServerModel
 
 

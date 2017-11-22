@@ -20,8 +20,8 @@ ClientModel<Cp, Io>::~ClientModel()
 {}
 
 template<class Cp, class Io>
-ssize_t ClientModel<Cp, Io>::Send(
-    int channelId, const char * buf, size_t length, int timeout)
+int ClientModel<Cp, Io>::Send(
+    int channelId, const char * buf, int length, int timeout)
 {
     ChannelType ch = m_rChannelPool.GetChannel(channelId);
     if ( ch == ChannelPool::InvalidChannel ) return -1;
@@ -30,8 +30,8 @@ ssize_t ClientModel<Cp, Io>::Send(
 }
 
 template<class Cp, class Io>
-ssize_t ClientModel<Cp, Io>::SendSome(
-    int channelId, const char * buf, size_t length)
+int ClientModel<Cp, Io>::SendSome(
+    int channelId, const char * buf, int length)
 {
     ChannelType ch = m_rChannelPool.GetChannel(channelId);
     if ( ch == ChannelPool::InvalidChannel ) return -1;
@@ -40,8 +40,8 @@ ssize_t ClientModel<Cp, Io>::SendSome(
 }
 
 template<class Cp, class Io>
-ssize_t ClientModel<Cp, Io>::Receive(
-    int channelId, char * buf, size_t length, int timeout)
+int ClientModel<Cp, Io>::Receive(
+    int channelId, char * buf, int length, int timeout)
 {
     ChannelType ch = m_rChannelPool.GetChannel(channelId);
     if ( ch == ChannelPool::InvalidChannel ) return -1;
@@ -50,14 +50,21 @@ ssize_t ClientModel<Cp, Io>::Receive(
 }
 
 template<class Cp, class Io>
-ssize_t ClientModel<Cp, Io>::ReceiveSome(
-    int channelId, char * buf, size_t length)
+int ClientModel<Cp, Io>::ReceiveSome(
+    int channelId, char * buf, int length)
 {
     ChannelType ch = m_rChannelPool.GetChannel(channelId);
     if ( ch == ChannelPool::InvalidChannel ) return -1;
     
     return m_rIoService.PostWrite(ch, MutableBuffer(buf, length), 0);
 }
+
+template<class Cp, class Io>
+int ClientModel<Cp, Io>::Wait(int *parrTaskId, int * parrResults, int length)
+{
+    return m_rIoService.Wait(parrTaskId, parrResults, length);
+}
+
 
 
 } // end of namespace net
