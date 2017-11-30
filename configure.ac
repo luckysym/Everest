@@ -6,6 +6,7 @@ AC_INIT([libeverest], [0.1], [shiyimin@yeah.net])
 AM_INIT_AUTOMAKE
 # AC_CONFIG_SRCDIR([src/everest.cpp])
 AC_CONFIG_HEADERS([config.h])
+
 AC_CONFIG_MACRO_DIR([m4])
 
 
@@ -23,6 +24,6 @@ LT_INIT()         # init libtool
 AC_CONFIG_FILES([
     Makefile 
     test/Makefile
-    test/net_aio/Makefile
+    test/rpc/Makefile
 ])
 AC_OUTPUT

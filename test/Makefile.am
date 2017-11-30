@@ -1,2 +1,2 @@
 AUTOMAKE_OPTIONS=foreign  
-SUBDIRS=net_aio
+SUBDIRS=rpc
