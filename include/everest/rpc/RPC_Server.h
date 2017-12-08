@@ -4,13 +4,9 @@
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
-#include <memory>
-#include <unordered_set>
-#include <sstream>
-#include <functional>
-#include <stdexcept>
-
 #include <errno.h>
+#include <unistd.h>
+
 #include <sys/types.h>  
 #include <sys/socket.h>
 #include <sys/socket.h>
@@ -18,33 +14,138 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 
+#include <memory>
+#include <unordered_set>
+#include <sstream>
+#include <functional>
+#include <stdexcept>
 
 namespace everest
 {
 namespace net 
 {
-    inline socklen_t SOCK_Set_Address_From_String(
-        sockaddr *addr, socklen_t len, int af, const char *str, int port)
+    class SocketAddress final
     {
-        if ( af == AF_INET ) {
-            sockaddr_in * pinaddr = (sockaddr_in*)addr;
-            if ( sizeof(sockaddr_in) > len ) {
-                printf("[ERROR] SOCK_Set_Address_From_String, AF_INET, no enough space");
-                return false;
-            }
-            pinaddr->sin_family = af;
-            pinaddr->sin_port = htons(port);
-            int ret = inet_aton(str, &pinaddr->sin_addr);
-            if ( ret == 0) {
-                printf("[ERROR] SOCK_Set_Address_From_String, AF_INET, bad addr, %s", str);
-                return false;
-            }
-            return true;
-        } else {
-            printf("[ERROR] bad address family %d\n", af);
+    private:
+        char      m_addrbuf[128];
+        socklen_t m_length;
+    
+    public:
+        SocketAddress() : m_length(128) { }
+        
+        SocketAddress(int family) : m_length(128) {
+            this->sock_addr().sa_family = family;
+        }
+        
+        SocketAddress(const SocketAddress& ) = default;
+        
+        ~SocketAddress() {}
+        
+        SocketAddress& operator=(const SocketAddress&) = default;
+        
+        int family() const { 
+            const sockaddr * p = (const sockaddr *)m_addrbuf;
+            return  p->sa_family;
+        }
+        
+        void family(int af) { 
+            sockaddr * p = (sockaddr *)m_addrbuf;
+            p->sa_family = af;
+        }
+        
+        socklen_t length() const { return m_length; }
+        
+        void length(socklen_t len) { m_length = len; }
+        
+        operator const sockaddr & () const {
+            return *((const sockaddr *)m_addrbuf);
+        }
+        
+        operator sockaddr & () {
+            return *((sockaddr *)m_addrbuf);
+        }
+        
+        sockaddr & sock_addr() { 
+            return *((sockaddr *)m_addrbuf);
+        }
+        
+        const sockaddr & sock_addr() const { 
+            return *((const sockaddr *)m_addrbuf);
+        }
+        
+    }; // end of class SocketAddress 
+    
+    class InetAdderssAdapter final
+    {
+    private:
+        SocketAddress &m_rAddr;
+        
+    public:
+        InetAdderssAdapter(SocketAddress& addr) 
+            : m_rAddr(addr)
+        {}
+        
+        ~InetAdderssAdapter() {}
+        
+        SocketAddress& address() { return m_rAddr; }
+        const SocketAddress& address() const  { return m_rAddr; }
+        
+        bool from_string(const char * endpoint);
+    }; // end of class InetAdderssAdapter
+    
+    inline bool InetAdderssAdapter::from_string(const char * endpoint)
+    {
+        sockaddr * paddr = &m_rAddr.sock_addr();
+        sockaddr_in * pinaddr = (sockaddr_in*)paddr;
+        
+        char * addr = ::strdup(endpoint);
+        char * p = strchr(addr, ':');
+        if ( p == nullptr ) {
+            free(addr);
+            printf("[ERROR] InetAdderssAdapter::from_string, bad endpoint, %s\n", endpoint);
             return false;
         }
-    } // end of SOCK_Set_Address_From_String
+        *p = '\0'; p += 1;
+        int port = atoi(p);
+        
+        int ret = inet_aton(addr, &pinaddr->sin_addr);
+        if ( ret == 0) {
+            printf("[ERROR] InetAdderssAdapter::from_string, AF_INET, bad addr, %s", addr);
+            return false;
+        }
+        pinaddr->sin_port = htons(port);
+        pinaddr->sin_family = AF_INET;
+        
+        return true;
+    } // end of InetAdderssAdapter::from_string
+    
+    class Protocol final
+    {
+    private:
+        int m_domain;
+        int m_type;
+        int m_proto;
+        
+    public:
+        Protocol(int domain, int type, int proto);
+        ~Protocol() {}
+        
+        int domain() const { return m_domain; }
+        void domain(int d) { m_domain = d; }
+        
+        int type() const { return m_type; }
+        void type(int t) { m_type = t; }
+        
+        int protocol() const { return m_proto; }
+        void protocol(int p) { m_proto = p; } 
+        
+        static Protocol tcp4() { return Protocol(AF_INET, SOCK_STREAM, 0); }
+        
+    }; // end of Protocol 
+    
+    inline Protocol::Protocol(int domain, int type, int proto)
+        : m_domain(domain), m_type(type), m_proto(proto)
+    {}
     
     class Socket final
     {
@@ -53,27 +154,36 @@ namespace net
         Socket& operator=(const Socket&) = delete;
         
     private:
-        int m_af;
         int m_fd;
     
     public:
-        Socket() {}
-        ~Socket() {}
+        Socket(const Protocol &proto);
+        ~Socket();
     
-        bool bind(const char *addr, int port);
+        bool bind(const SocketAddress& addr);
         bool listen();
-        bool close();
     }; // end of class Socket
 
-    bool Socket::bind(const char *addr, int port)
+    Socket::Socket(const Protocol &proto) 
     {
-        char addrbuf[128];
-        socklen_t len = SOCK_Set_Address_From_String((sockaddr *)addrbuf, 128, m_af, addr, port);
-        if ( len == (socklen_t)-1 ) {
-            printf("[ERROR] Socket::bind, set address failed \n");
-            return false;
+        m_fd = ::socket(proto.domain(), proto.type(), proto.protocol());
+        if ( m_fd < 0 ) {
+            printf("[ERROR] Socket::Socket, failed to create socket, %d, %s\n",
+                errno, strerror(errno));
         }
-        int ret = ::bind(m_fd, (const sockaddr*)addrbuf, len);
+    }
+    
+    Socket::~Socket() 
+    {
+        if ( m_fd >= 0 ) {
+            ::close(m_fd);
+            m_fd = -1;
+        }
+    }
+    
+    bool Socket::bind(const SocketAddress& addr)
+    {
+        int ret = ::bind(m_fd, &(const sockaddr&)addr, addr.length());
         if ( ret < 0 ) {
             printf("[ERROR] Socket::bind, bind failed %d, %s\n", errno, strerror(errno));
             return false;
@@ -104,6 +214,8 @@ namespace rpc
         net::Socket m_socket;
         
     public:
+        RPC_TcpSocketListener() : m_socket(net::Protocol::tcp4()) {}
+    
         bool open(const char * endpoint);
     }; // end of class RPC_TcpSocketListener
     
@@ -165,18 +277,15 @@ namespace rpc {
     
     bool RPC_TcpSocketListener::open(const char * endpoint)
     {
-        char * addr = ::strdup(endpoint);
-        char * p = strchr(addr, ':');
-        if ( p == nullptr ) {
-            free(addr);
-            printf("[ERROR] RPC_TcpSocketListener::open, bad endpoint, %s\n", endpoint);
+        net::SocketAddress cSockaddr;
+        net::InetAdderssAdapter addr_adapter(cSockaddr);
+        bool isok = addr_adapter.from_string(endpoint);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, bad endpoint address, %s\n", endpoint);
             return false;
         }
-        *p = '\0'; p += 1;
         
-        int port = atoi(p);
-        bool isok = m_socket.bind(addr, port);
-        free(addr);
+        isok = m_socket.bind(cSockaddr);
         if ( !isok ) {
             printf("[ERROR] RPC_TcpSocketListener::open, bind failed, %s\n", endpoint);
             return false;

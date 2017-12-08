@@ -72,7 +72,6 @@ int stop_server()
     return 0;
 }
 
-
 int start_client(int argc, char **argv)
 {
     using namespace std;
