@@ -13,12 +13,15 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <sys/epoll.h>
 
 #include <memory>
 #include <unordered_set>
 #include <sstream>
 #include <functional>
 #include <stdexcept>
+#include <queue>
+
 
 namespace everest
 {
@@ -160,6 +163,7 @@ namespace net
         Socket(const Protocol &proto);
         ~Socket();
     
+        int handle() const { return m_fd; }
         bool bind(const SocketAddress& addr);
         bool listen();
     }; // end of class Socket
@@ -202,41 +206,190 @@ namespace net
         return true;
     } // end of Socket::listen() 
     
+    class EPoller final 
+    {
+    public:
+        static const int Event_Read = EPOLLIN;
+    
+    private:
+        int m_epfd;
+    
+    private:
+        EPoller(const EPoller& ) = delete;
+        EPoller& operator=(const EPoller&) = delete;
+        
+    public:
+        EPoller();
+        ~EPoller();
+        
+        bool add(int fd, int events, void * pdata);
+        bool remove(int fd);
+        bool set(int fd, int events, void *pdata);
+        
+    }; // end of class EPoller
+    
+    
+    inline EPoller::EPoller() 
+    {
+        m_epfd = ::epoll_create1(EPOLL_CLOEXEC);
+        if ( m_epfd < 0 ) {
+            printf("[ERROR] EPoller::EPoller, epoll_create1 failed, %d, %s\n", errno, strerror(errno));
+        }
+    }
+    
+    inline EPoller::~EPoller()
+    {
+        if ( m_epfd >= 0 ) {
+            ::close(m_epfd);
+            m_epfd = -1;
+        }
+    }
+    
+    inline bool EPoller::add(int fd, int events, void *pdata)
+    {
+        epoll_event e;
+        e.events = events;
+        e.data.ptr = pdata;
+        int ret = ::epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &e);
+        if ( ret < 0 ) {
+            printf("[ERROR] EPoller::add, epoll_ctl failed, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        return true;
+    }
+    
+    inline bool EPoller::set(int fd, int events, void *pdata)
+    {
+        epoll_event e;
+        e.events = events;
+        e.data.ptr = pdata;
+        int ret = ::epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &e);
+        if ( ret < 0 ) {
+            printf("[ERROR] EPoller::set, epoll_ctl failed, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        return true;
+    }
+    
+    inline bool EPoller::remove(int fd) 
+    {
+        int ret = ::epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr);
+        if ( ret < 0 ) {
+            printf("[ERROR] EPoller::remove, epoll_ctl failed, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        return true;
+    }
+    
 } // end of namespace net 
     
 namespace rpc 
 {
+    class RPC_SocketObject 
+    {
+    public:
+        static const int Type_Listener = 1;
+        static const int Type_Channel  = 2;
+        
+    protected:
+        net::Socket m_socket;
+        int         m_type;
+    public:
+        RPC_SocketObject(const net::Protocol& proto, int type) 
+            : m_socket(proto), m_type(type) {}
+        
+        net::Socket& get_socket() { return m_socket; }
+        const net::Socket& get_socket() const { return m_socket; }
+        
+        int type() const { return m_type; }
+    }; // end of class RPC_TcpSocketListener
+    
     class RPC_TcpSocketChannel {};
     
-    class RPC_TcpSocketListener 
+    class RPC_TcpSocketListener  : public RPC_SocketObject
     {
-    private:
-        net::Socket m_socket;
-        
     public:
-        RPC_TcpSocketListener() : m_socket(net::Protocol::tcp4()) {}
+        RPC_TcpSocketListener() : RPC_SocketObject(net::Protocol::tcp4(), Type_Listener) {}
     
         bool open(const char * endpoint);
     }; // end of class RPC_TcpSocketListener
+    
+    template<class Poller = net::EPoller>
+    class RPC_Reactor 
+    {
+    private:
+        Poller m_poller;
+
+    public:
+
+        bool reg(RPC_SocketObject *sockobj) 
+        {
+            bool isok = m_poller.add(sockobj->get_socket().handle(), 0, sockobj);
+            if ( !isok ) {
+                printf("[ERROR] RPC_Reactor::reg(sockobj) error\n");
+                return false;
+            }
+            return true;
+        }
+    
+        bool add_read(RPC_SocketObject *sockobj, int timeout)
+        {
+            bool isok = m_poller.set(sockobj->get_socket().handle(), Poller::Event_Read, sockobj);
+            if ( !isok ) {
+                printf("[ERROR] RPC_Reactor::add_read(sockobj) error\n");
+                return false;
+            }
+            
+            // todo timeout queue
+            
+            return isok;
+        }
+    
+        int run() {
+            printf("[ERROR] RPC_Reactor::run error\n");
+            return false;
+        }
+    }; // class RPC_Reactor
+    
+    class RPC_Message {};
     
     class RPC_TcpSocketService_Impl
     {
     public:
         typedef RPC_TcpSocketChannel   ChannelType;
         typedef RPC_TcpSocketListener  ListenerType;
+        typedef RPC_Message            MessageType;
+        typedef RPC_Reactor<>          ReactorType;
     }; // end of class RPC_TcpSocketService_Impl
-    
-    class RPC_Message {};
     
     template<class Impl = RPC_TcpSocketService_Impl>
     class RPC_Service
     {
     public:
-        typedef typename Impl::ChannelType                   ChannelType;
-        typedef typename Impl::ListenerType                  ListenerType;
-        typedef std::shared_ptr<typename Impl::ChannelType>  ChannelPtr;
-        typedef std::shared_ptr<typename Impl::ListenerType> ListenerPtr;
-        typedef std::shared_ptr<RPC_Message>                 MessagePtr;
+    
+        typedef typename Impl::ChannelType    ChannelType;
+        typedef typename Impl::ListenerType   ListenerType;
+        typedef typename Impl::ChannelType*   ChannelPtr;
+        typedef typename Impl::ListenerType*  ListenerPtr;
+        typedef typename Impl::MessageType    MessageType;
+        typedef typename Impl::ReactorType    ReactorType;
+        
+        struct AsyncTask
+        {
+            int          task_type;
+            ChannelPtr   p_channel;
+            ListenerPtr  p_listener;
+            MessageType  message;
+            int          timeout;
+        };  // end struct AsyncTask 
+        typedef std::queue<AsyncTask*>         AsyncTaskQueue;
+        
+        static const int Task_AsyncAccept  = 1;
+        
+    private:
+        AsyncTaskQueue m_async_taks_queue;
+        ReactorType    m_reactor;
+        std::function<void (ListenerPtr, int)> m_accept_error_handler;
         
     private:
         RPC_Service(const RPC_Service&) = delete;
@@ -262,13 +415,12 @@ namespace rpc
         bool        close_listener(ListenerPtr listener);
         
         bool        post_accept(ListenerPtr listener);
-        bool        post_receive(ChannelPtr channel, MessagePtr ptrMessage, int timeout);
-        bool        post_send(ChannelPtr channel, MessagePtr ptrMessage, int timeout);
+        bool        post_receive(ChannelPtr channel, MessageType & rMessage, int timeout);
+        bool        post_send(ChannelPtr channel, MessageType & rMessage, int timeout);
         
         int         run();
-        
     }; // end of class RPC_Service 
-        
+    
 } // end of namespace rpc 
 } // end of namespace everest 
 
@@ -312,22 +464,61 @@ namespace rpc {
     typename RPC_Service<Impl>::ListenerPtr 
     RPC_Service<Impl>::open_listener(const char * endpoint)
     {
+        // 打开监听器
         ListenerPtr ptrListener(new ListenerType());
         bool isok = ptrListener->open(endpoint);
-        if ( isok ) return ptrListener;
-        else return ListenerPtr();
+        if ( !isok ) {
+            printf("[ERROR] RPC_Service::open_listener, open listener failed\n");
+            return ListenerPtr(nullptr);
+        }
+        
+        // 注册到Reactor
+        isok = m_reactor.reg(ptrListener);
+        if ( !isok ) {
+            printf("[ERROR] RPC_Service::open_listener, failed reg\n");
+            delete ptrListener;
+            return ListenerPtr(nullptr);
+        }
+        
+        // 返回监听器指针
+        return ptrListener;
     } // end of RPC_Service<Impl>::open_listener
     
     template<class Impl>
     bool RPC_Service<Impl>::post_accept(ListenerPtr listener)
     {
-        return false;
+        AsyncTask *task = new AsyncTask;
+        
+        task->task_type  = Task_AsyncAccept;
+        task->p_listener = listener;
+        task->timeout    = -1;
+        
+        // todo: make lock
+        m_async_taks_queue.push(task);
+        return true;
     }
     
     template<class Impl>
     int RPC_Service<Impl>::run()
     {
-        return -1;
+        bool isok;
+        while ( !m_async_taks_queue.empty() ) {
+            AsyncTask * task = m_async_taks_queue.front();
+            m_async_taks_queue.pop();
+            
+            if ( task->task_type == Task_AsyncAccept) {
+                m_reactor.add_read(task->p_listener, task->timeout);
+            } else {
+                printf("[ERROR] RPC_Service::run, unknown task type %d\n", task->task_type);
+            }
+            delete task;
+        }
+        
+        int ret = m_reactor.run();
+        if ( ret < 0 ) {
+            printf("[ERROR] RPC_Service::run, reactor run failed\n");
+        }
+        return ret;
     }
     
 } // end of namespace rpc 
