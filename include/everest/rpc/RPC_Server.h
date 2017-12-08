@@ -9,279 +9,221 @@
 #include <sstream>
 #include <functional>
 #include <stdexcept>
-#include <boost/asio.hpp>
 
-    
+#include <errno.h>
+#include <sys/types.h>  
+#include <sys/socket.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+
+
 namespace everest
 {
-
-namespace log 
+namespace net 
 {
-    const char * g_arrLogLevels[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
-    class Logger
+    inline socklen_t SOCK_Set_Address_From_String(
+        sockaddr *addr, socklen_t len, int af, const char *str, int port)
     {
-    public:
-        bool error_enabled() { return true; }
-    
-        bool write(int level, const char *msg) {
-            std::cout<<'['<<g_arrLogLevels[level]<<"] "<<msg<<std::endl;
+        if ( af == AF_INET ) {
+            sockaddr_in * pinaddr = (sockaddr_in*)addr;
+            if ( sizeof(sockaddr_in) > len ) {
+                printf("[ERROR] SOCK_Set_Address_From_String, AF_INET, no enough space");
+                return false;
+            }
+            pinaddr->sin_family = af;
+            pinaddr->sin_port = htons(port);
+            int ret = inet_aton(str, &pinaddr->sin_addr);
+            if ( ret == 0) {
+                printf("[ERROR] SOCK_Set_Address_From_String, AF_INET, bad addr, %s", str);
+                return false;
+            }
             return true;
+        } else {
+            printf("[ERROR] bad address family %d\n", af);
+            return false;
         }
-        
-    }; // end of class Logger
+    } // end of SOCK_Set_Address_From_String
     
-    class Log_Stream
+    class Socket final
     {
     private:
-        Logger & m_logger;
-        int      m_level;
-        std::stringstream m_stream;
+        Socket(const Socket& ) = delete;
+        Socket& operator=(const Socket&) = delete;
         
+    private:
+        int m_af;
+        int m_fd;
+    
     public:
-        Log_Stream(Logger & log, int level) 
-            : m_logger(log), m_level(level)
-        {}
-          
-        ~Log_Stream() {}
-        
-        Log_Stream& operator<<(const char *str) 
-        {
-            m_stream<<str;
+        Socket() {}
+        ~Socket() {}
+    
+        bool bind(const char *addr, int port);
+        bool listen();
+        bool close();
+    }; // end of class Socket
+
+    bool Socket::bind(const char *addr, int port)
+    {
+        char addrbuf[128];
+        socklen_t len = SOCK_Set_Address_From_String((sockaddr *)addrbuf, 128, m_af, addr, port);
+        if ( len == (socklen_t)-1 ) {
+            printf("[ERROR] Socket::bind, set address failed \n");
+            return false;
+        }
+        int ret = ::bind(m_fd, (const sockaddr*)addrbuf, len);
+        if ( ret < 0 ) {
+            printf("[ERROR] Socket::bind, bind failed %d, %s\n", errno, strerror(errno));
+            return false;
         }
         
-        void flush() {
-            m_logger.write(m_level, m_stream.str().c_str());
+        return true;
+    } // end of Socket::bind
+    
+    bool Socket::listen() 
+    {
+        int ret = ::listen(m_fd, SOMAXCONN);
+        if ( ret < 0 ) {
+            printf("[ERROR] Socket::listen, listen failed %d, %s\n", errno, strerror(errno));
+            return false;
         }
-        
-    };  // end of class LogStream 
+        return true;
+    } // end of Socket::listen() 
     
-    typedef std::shared_ptr<Logger> LoggerPtr; 
-    
-    static const int Trace = 0;
-    static const int Debug = 1;
-    static const int Info  = 2;
-    static const int Warn  = 3;
-    static const int Error = 4;
-    static const int Fatal = 5;
-    
-    LoggerPtr GetLogger() { return LoggerPtr(new Logger()); }
-    
-} // end of namespace log 
+} // end of namespace net 
     
 namespace rpc 
 {
-    struct Tcp_v4
-    {
-        typedef boost::asio::ip::tcp::acceptor Acceptor;
-        typedef boost::asio::ip::tcp::socket   Socket;
-        typedef boost::asio::ip::tcp::endpoint Endpoint;
-        typedef boost::asio::ip::address_v4    Address;
-        
-        static boost::asio::ip::tcp  get() { return boost::asio::ip::tcp::v4(); }
-    };
-
-    template<class Protocol = Tcp_v4>
-    class RPC_SocketService final
-    {
-    private:
-        RPC_SocketService(const RPC_SocketService&) = delete;
-        RPC_SocketService& operator=(const RPC_SocketService&) = delete;
-        
-    public:
-        typedef Protocol                                      ProtocolType;
-        typedef typename Protocol::Acceptor                   Acceptor;
-        typedef typename Protocol::Socket                     Socket;
-        typedef typename Protocol::Address                    Address;
-        typedef typename Protocol::Endpoint                   Endpoint;
-        typedef std::shared_ptr<typename Protocol::Acceptor>  AcceptorPtr;
-        typedef std::shared_ptr<typename Protocol::Socket>    SocketPtr;
-        
-        class AsyncConnectHandler
-        {
-        private:
-            RPC_SocketService& m_rService;
-            SocketPtr          m_ptrSocket;
-            
-        public:
-            AsyncConnectHandler(RPC_SocketService& service, SocketPtr &sockPtr) 
-                : m_rService(service), m_ptrSocket(sockPtr) 
-            {}
-            
-            ~AsyncConnectHandler() {}
-            
-            void operator() (const boost::system::error_code& ec) {
-                if ( m_rService.m_connHandler ) {
-                    m_rService.m_connHandler(m_rService, m_ptrSocket, !ec);
-                } else {
-                    m_rService.m_ptrLog->write(log::Error, "async connect handler not callable");
-                    throw std::runtime_error("async connect handler not callable");
-                }
-                return ;
-            }
-        }; // end of class AsyncConnectHandler
-
-    private:
-        boost::asio::io_service         m_ioservice;
-        std::unordered_set<AcceptorPtr> m_setAcceptor;
-        std::unordered_set<SocketPtr>   m_setSocket; 
-        log::LoggerPtr                  m_ptrLog;
-        std::function<void(RPC_SocketService &, SocketPtr &, bool)> m_connHandler;
-        
-    public:
-        RPC_SocketService();
-        ~RPC_SocketService();
-
-        AcceptorPtr open_listener(const char * endpoint);
-        SocketPtr   open_channel(const char * endpoint);
-        
-        template<class Handler>
-        void set_conn_handler(Handler h) { m_connHandler = h; }
-        
-        int run();
-        
-    }; // end of class RPC_Server
+    class RPC_TcpSocketChannel {};
     
+    class RPC_TcpSocketListener 
+    {
+    private:
+        net::Socket m_socket;
+        
+    public:
+        bool open(const char * endpoint);
+    }; // end of class RPC_TcpSocketListener
+    
+    class RPC_TcpSocketService_Impl
+    {
+    public:
+        typedef RPC_TcpSocketChannel   ChannelType;
+        typedef RPC_TcpSocketListener  ListenerType;
+    }; // end of class RPC_TcpSocketService_Impl
+    
+    class RPC_Message {};
+    
+    template<class Impl = RPC_TcpSocketService_Impl>
+    class RPC_Service
+    {
+    public:
+        typedef typename Impl::ChannelType                   ChannelType;
+        typedef typename Impl::ListenerType                  ListenerType;
+        typedef std::shared_ptr<typename Impl::ChannelType>  ChannelPtr;
+        typedef std::shared_ptr<typename Impl::ListenerType> ListenerPtr;
+        typedef std::shared_ptr<RPC_Message>                 MessagePtr;
+        
+    private:
+        RPC_Service(const RPC_Service&) = delete;
+        RPC_Service& operator=(const RPC_Service&) = delete;
+
+    public: 
+        RPC_Service();
+        ~RPC_Service();
+        
+        template<class ConnHandler>
+        void        set_conn_handle(ConnHandler handler);
+        
+        template<class RecvHandler>
+        void        set_recv_handle(RecvHandler handler);
+        
+        template<class SendHandler>
+        void        set_send_handle(SendHandler handler);
+        
+        bool        open_channel(const char * endpoint, int timeout);
+        bool        close_channel(ChannelPtr channel);
+        
+        ListenerPtr open_listener(const char * endpoint);
+        bool        close_listener(ListenerPtr listener);
+        
+        bool        post_accept(ListenerPtr listener);
+        bool        post_receive(ChannelPtr channel, MessagePtr ptrMessage, int timeout);
+        bool        post_send(ChannelPtr channel, MessagePtr ptrMessage, int timeout);
+        
+        int         run();
+        
+    }; // end of class RPC_Service 
+        
 } // end of namespace rpc 
 } // end of namespace everest 
 
-namespace everest
-{
-namespace rpc 
-{
-    template<class Protocol>
-    RPC_SocketService<Protocol>::RPC_SocketService() 
-        : m_ptrLog(log::GetLogger())
-    {}
+namespace everest {
+namespace rpc {
     
-    template<class Protocol>
-    RPC_SocketService<Protocol>::~RPC_SocketService() {}
-    
-    template<class Protocol>
-    int RPC_SocketService<Protocol>::run() {
-        boost::system::error_code ec;
-        int ret = (int)m_ioservice.run(ec);
-        if ( ec )  {
-            if ( m_ptrLog->error_enabled() ) {
-                m_ptrLog->write(log::Error, "io service run fail");
-                return -1;
-            }
+    bool RPC_TcpSocketListener::open(const char * endpoint)
+    {
+        char * addr = ::strdup(endpoint);
+        char * p = strchr(addr, ':');
+        if ( p == nullptr ) {
+            free(addr);
+            printf("[ERROR] RPC_TcpSocketListener::open, bad endpoint, %s\n", endpoint);
+            return false;
         }
-        return ret;
+        *p = '\0'; p += 1;
+        
+        int port = atoi(p);
+        bool isok = m_socket.bind(addr, port);
+        free(addr);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, bind failed, %s\n", endpoint);
+            return false;
+        }
+        
+        isok = m_socket.listen();
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, listen failed, %s\n", endpoint);
+            return false;
+        }
+        printf("[TRACE] RPC_TcpSocketListener::open, result %s\n", isok?"true":"false");
+        return isok;
+        
+    } // end of RPC_TcpSocketListener::open
+    
+    
+    template<class Impl>
+    RPC_Service<Impl>::RPC_Service() {}
+    
+    template<class Impl>
+    RPC_Service<Impl>::~RPC_Service() {}
+    
+    template<class Impl>
+    typename RPC_Service<Impl>::ListenerPtr 
+    RPC_Service<Impl>::open_listener(const char * endpoint)
+    {
+        ListenerPtr ptrListener(new ListenerType());
+        bool isok = ptrListener->open(endpoint);
+        if ( isok ) return ptrListener;
+        else return ListenerPtr();
+    } // end of RPC_Service<Impl>::open_listener
+    
+    template<class Impl>
+    bool RPC_Service<Impl>::post_accept(ListenerPtr listener)
+    {
+        return false;
     }
     
-    template<class Protocol>
-    typename RPC_SocketService<Protocol>::AcceptorPtr
-    RPC_SocketService<Protocol>::open_listener(const char *endpoint) 
+    template<class Impl>
+    int RPC_Service<Impl>::run()
     {
-        const char * pos = strchr(endpoint, ':');
-        if ( pos == nullptr ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "bad endpoint string, addr:port, %s", endpoint);
-                m_ptrLog->write(log::Error, buf);
-            }
-            return AcceptorPtr(nullptr);
-        }
-        char * addr = strndup(endpoint, pos - endpoint);
-        assert(addr);
-        
-        Address  address;
-        boost::system::error_code ec;
-        address.from_string(addr, ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "bad address string, %s", addr);
-                m_ptrLog->write(log::Error, buf);
-            }
-            free(addr);
-            return AcceptorPtr(nullptr);
-        }
-        free(addr);
-        
-        AcceptorPtr acceptorPtr(new Acceptor(m_ioservice));
-        acceptorPtr->open(Protocol::get(), ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                m_ptrLog->write(log::Error, "failed to open acceptor");
-            }
-            return AcceptorPtr(nullptr);
-        }
-        
-        int port = atoi(pos + 1);
-        Endpoint ep(address, port);
-        acceptorPtr->bind(ep, ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "failed to bind, %s, %d", ep.address().to_string().c_str(), port);
-                m_ptrLog->write(log::Error, buf);
-            }
-            return AcceptorPtr(nullptr);
-        }
-        acceptorPtr->listen(boost::asio::socket_base::max_connections, ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "listen failed, %s", endpoint);
-                m_ptrLog->write(log::Error, buf);
-            }
-            return AcceptorPtr(nullptr);;
-        }
-        m_setAcceptor.insert(acceptorPtr);
-        
-        return acceptorPtr;
-    } // end of RPC_SocketService<Protocol>::open_listener(const char *endpoint) 
-    
-    template<class Protocol>
-    typename RPC_SocketService<Protocol>::SocketPtr
-    RPC_SocketService<Protocol>::open_channel(const char *endpoint)
-    {
-        const char * pos = strchr(endpoint, ':');
-        if ( pos == nullptr ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "bad endpoint string, addr:port, %s", endpoint);
-                m_ptrLog->write(log::Error, buf);
-            }
-            return SocketPtr(nullptr);
-        }
-        char * addr = strndup(endpoint, pos - endpoint);
-        assert(addr);
-        
-        Address  address;
-        boost::system::error_code ec;
-        address.from_string(addr, ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                char buf[128];
-                snprintf(buf, 128, "bad remote address string, %s", addr);
-                m_ptrLog->write(log::Error, buf);
-            }
-            free(addr);
-            return SocketPtr(nullptr);
-        }
-        free(addr);
-        
-        SocketPtr socketPtr(new Socket(m_ioservice));
-        socketPtr->open(Protocol::get(), ec);
-        if ( ec ) {
-            if ( m_ptrLog->error_enabled() ) {
-                m_ptrLog->write(log::Error, "failed to open socket");
-            }
-            return SocketPtr(nullptr);
-        }
-        int port = atoi(pos + 1);
-        Endpoint ep(address, port);
-        socketPtr->async_connect(ep, AsyncConnectHandler(*this, socketPtr));
-        m_setSocket.insert(socketPtr);
-        
-        return socketPtr;
-    } // end of RPC_SocketService<Protocol>::open_channel(const char *endpoint)
+        return -1;
+    }
     
 } // end of namespace rpc 
-} // end of namespace everest 
+} // end of namespace everest
 
-    
+
 
 #endif // INCLUDE_EVEREST_RPC_RPC_SERVER_H

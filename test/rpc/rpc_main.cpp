@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <everest/rpc/RPC_Server.h>
 #include <iostream>
+#include <unistd.h>
 
 namespace rpc = everest::rpc;
 
@@ -91,45 +92,22 @@ int stop_client()
 
 void * run_server(void *)
 {
-    using namespace std;
-    rpc::RPC_SocketService<> server;
+    rpc::RPC_Service<> server;
     
-    rpc::RPC_SocketService<>::AcceptorPtr acceptorPtr = server.open_listener("127.0.0.1:8090");
-    if ( !acceptorPtr ) {
-        cout<<"[error] open listener failed"<<endl;
-        server_result = -1;
-        return nullptr;
-    }
-    cout<<"[info] listener ok"<<endl;
-    return 0;
-}
-
-void client_conn_handler(
-    rpc::RPC_SocketService<> & service,
-    rpc::RPC_SocketService<>::SocketPtr & sock, 
-    bool success)
-{
-    if ( success ) {
-        throw std::runtime_error("client conn success");
-    } else {
-        throw std::runtime_error("client conn fail");
-    }
+    rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener("127.0.0.1:9999");
+    if ( !ptrListener ) { throw std::runtime_error("open listener failed"); } 
+    
+    bool isok = server.post_accept(ptrListener);
+    if ( !isok ) { throw std::runtime_error("post accept failed");}
+    
+    int result = server.run();
+    if ( result < 0 ) { throw std::runtime_error("server run failed");}
+    
+    return nullptr;
 }
 
 void * run_client(void *)
 {
-    using namespace std;
-    rpc::RPC_SocketService<> client;
-    
-    client.set_conn_handler(client_conn_handler);
-    
-    rpc::RPC_SocketService<>::SocketPtr socketPtr = client.open_channel("127.0.0.1:8090");
-    if ( !socketPtr ) {
-        cout<<"[error] open channel failed"<<endl;
-        client_result = -1;
-        return nullptr;
-    }
-    client.run();
-    cout<<"[info] open client ok"<<endl;
+    rpc::RPC_Service<> client;
     return nullptr;
 }
