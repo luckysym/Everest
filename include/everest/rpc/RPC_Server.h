@@ -18,12 +18,13 @@
 
 namespace everest
 {
-namespace net 
-{
+    class DateTime
+    {
+    public:
+        static int64_t get_timestamp() { throw std::runtime_error("DateTime::get_timestamp()"); }
+    }; // end of namespace 
 
 
-} // end of namespace net 
-    
 namespace rpc 
 {
     /**
@@ -32,6 +33,10 @@ namespace rpc
     struct RPC_Constants
     {
         static const int Finish = 0;
+        
+        static const int Read   = 1;
+        static const int Write  = 2;
+        static const int Accept = 4;
     }; // end of RPC_Constants
     
     class RPC_SocketObject 
@@ -66,19 +71,21 @@ namespace rpc
     /**
      * 超时队列
      */
-    class RPC_TimeoutQueue
+    class RPC_TaskTimeoutQueue
     {
+    public:
+        
     public:
         int front() const { return 0; }
         void pop_front() {}
     }; // end of class RPC_TimeoutQueue
     
-    template<class Poller = net::EPoller, class TimeoutQ = RPC_TimeoutQueue>
+    template<class Poller = net::EPoller, class TaskTimeoutQueue = RPC_TaskTimeoutQueue>
     class RPC_Proactor 
     {
     private:
-        Poller   m_poller;
-        TimeoutQ m_timeout_queue;   // 超时队列
+        Poller           m_poller;
+        TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
         
     public:
 
@@ -91,7 +98,7 @@ namespace rpc
             }
             return true;
         }
-    
+
         bool add_read(RPC_SocketObject *sockobj, int timeout)
         {
             bool isok = m_poller.set(sockobj->get_socket().handle(), Poller::Event_Read, sockobj);
@@ -100,14 +107,17 @@ namespace rpc
                 return false;
             }
             
-            // todo timeout queue
-            
+            // m_task_timeout_queue.push(timeout);  // 放入超时队列
             return isok;
         }
     
         int run() {
-            int timeout = m_timeout_queue.front();
-            m_timeout_queue.pop_front();
+            int64_t now = DateTime::get_timestamp();
+            // TODO 获取任务，计算超时
+            int timeout = 0;
+
+
+            
             int ret = m_poller.wait(timeout);
             if ( ret > 0 ) {
                 // 有事件发生
@@ -115,18 +125,22 @@ namespace rpc
                 while ( iter.has_next() ) {
                     typename Poller::Event e = iter.next();
                     if ( e.events() & Poller::Event_Read ) {
-                        int ret = this->on_readable((RPC_SocketObject*)e.data());
-                        if ( ret == RPC_Constants::Finish ) {
-                            // 当前接收任务结束（比如本次消息完整接收），就暂停监听该socket
-                            m_poller.set(e.fd(), Poller::Event_None, nullptr);
+                        RPC_SocketObject * p_sock = (RPC_SocketObject*)e.data();
+                        if ( p_sock->type() == RPC_SocketObject::Type_Listener ) {
+                            // int ret = this->on_acceptable((RPC_SocketListener*)p_sock);
+                            if ( ret == RPC_Constants::Finish ) {
+                                // TODO 接下去怎么做
+                            } else {
+                                throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
+                            }
                         } else {
-                            throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
+                            throw std::runtime_error("RPC_Proactor::run, bad socket type");
                         }
-                    }
+                    } // end if
                 } // end while
             } else if ( ret == 0 ) {
                 // 超时，并没有事件发生
-                printf("[ERROR] RPC_Proactor::run, poller wait timeout\n");
+                printf("[ERROR] RPC_Proactor::run, poller wait timeout %d ms\n", timeout);
             } else {
                 // poller wait出现错误
                 printf("[ERROR] RPC_Proactor::run, poller wait error\n");
@@ -136,8 +150,13 @@ namespace rpc
             return false;
         }
     private:
-        int on_readable(RPC_SocketObject * psockobj) {
+        int on_acceptable(RPC_TcpSocketListener * plistener) {
             printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
+            return RPC_Constants::Finish;
+        }
+        
+        int on_accept_timeout(RPC_TcpSocketListener * plistener) {
+            printf("[ERROR] RPC_Proactor::on_accept_timeout, poller wait error\n");
             return RPC_Constants::Finish;
         }
     }; // class RPC_Proactor
@@ -288,6 +307,7 @@ namespace rpc {
         
         // todo: make lock
         m_async_taks_queue.push(task);
+        
         return true;
     }
     
