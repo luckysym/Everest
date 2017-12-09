@@ -209,9 +209,46 @@ namespace net
     class EPoller final 
     {
     public:
+        static const int Event_None = 0;
         static const int Event_Read = EPOLLIN;
         
         static const int Step_Size = 1024;
+        
+        class Event 
+        {
+        public:
+            
+            int fd() {
+                printf("[ERROR] EPoller::Event::fd, not impl\n");
+                return -1;
+            }
+            
+            void * data() { 
+                printf("[ERROR] EPoller::Event::data, not impl\n");
+                return nullptr; 
+            }
+            
+            int events() {
+                printf("[ERROR] EPoller::Event::events, not impl\n");
+                return 0;
+            }
+        }; // end of Event 
+        
+        class Iterator 
+        {
+        public:
+            bool has_next() { 
+                printf("[ERROR] EPoller::Iterator::has_next, not impl\n");
+                return false; 
+            }
+            
+            Event next() { 
+                printf("[ERROR] EPoller::Iterator::next, not impl\n");
+                return Event();
+            }
+                        
+        }; // end of Iterator 
+        
     private:
         int           m_epfd;
         int           m_maxevents;
@@ -231,6 +268,10 @@ namespace net
         bool set(int fd, int events, void *pdata);
         int  wait(int timeout);
         
+        Iterator events() {
+            printf("[ERROR] EPoller::events, not impl\n");
+            return Iterator();
+        }
     }; // end of class EPoller
     
     
@@ -314,6 +355,14 @@ namespace net
     
 namespace rpc 
 {
+    /**
+     * RPC过程常量集合
+     */
+    struct RPC_Constants
+    {
+        static const int Finish = 0;
+    }; // end of RPC_Constants
+    
     class RPC_SocketObject 
     {
     public:
@@ -343,19 +392,30 @@ namespace rpc
         bool open(const char * endpoint);
     }; // end of class RPC_TcpSocketListener
     
-    template<class Poller = net::EPoller>
-    class RPC_Reactor 
+    /**
+     * 超时队列
+     */
+    class RPC_TimeoutQueue
+    {
+    public:
+        int front() const { return 0; }
+        void pop_front() {}
+    }; // end of class RPC_TimeoutQueue
+    
+    template<class Poller = net::EPoller, class TimeoutQ = RPC_TimeoutQueue>
+    class RPC_Proactor 
     {
     private:
-        Poller m_poller;
-
+        Poller   m_poller;
+        TimeoutQ m_timeout_queue;   // 超时队列
+        
     public:
 
         bool reg(RPC_SocketObject *sockobj) 
         {
             bool isok = m_poller.add(sockobj->get_socket().handle(), 0, sockobj);
             if ( !isok ) {
-                printf("[ERROR] RPC_Reactor::reg(sockobj) error\n");
+                printf("[ERROR] RPC_Proactor::reg(sockobj) error\n");
                 return false;
             }
             return true;
@@ -365,7 +425,7 @@ namespace rpc
         {
             bool isok = m_poller.set(sockobj->get_socket().handle(), Poller::Event_Read, sockobj);
             if ( !isok ) {
-                printf("[ERROR] RPC_Reactor::add_read(sockobj) error\n");
+                printf("[ERROR] RPC_Proactor::add_read(sockobj) error\n");
                 return false;
             }
             
@@ -375,10 +435,41 @@ namespace rpc
         }
     
         int run() {
-            printf("[ERROR] RPC_Reactor::run error\n");
+            int timeout = m_timeout_queue.front();
+            m_timeout_queue.pop_front();
+            int ret = m_poller.wait(timeout);
+            if ( ret > 0 ) {
+                // 有事件发生
+                typename Poller::Iterator iter = m_poller.events();
+                while ( iter.has_next() ) {
+                    typename Poller::Event e = iter.next();
+                    if ( e.events() & Poller::Event_Read ) {
+                        int ret = this->on_readable((RPC_SocketObject*)e.data());
+                        if ( ret == RPC_Constants::Finish ) {
+                            // 当前接收任务结束（比如本次消息完整接收），就暂停监听该socket
+                            m_poller.set(e.fd(), Poller::Event_None, nullptr);
+                        } else {
+                            throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
+                        }
+                    }
+                } // end while
+            } else if ( ret == 0 ) {
+                // 超时，并没有事件发生
+                printf("[ERROR] RPC_Proactor::run, poller wait timeout\n");
+            } else {
+                // poller wait出现错误
+                printf("[ERROR] RPC_Proactor::run, poller wait error\n");
+            }
+            return ret;
+            
             return false;
         }
-    }; // class RPC_Reactor
+    private:
+        int on_readable(RPC_SocketObject * psockobj) {
+            printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
+            return RPC_Constants::Finish;
+        }
+    }; // class RPC_Proactor
     
     class RPC_Message {};
     
@@ -388,7 +479,7 @@ namespace rpc
         typedef RPC_TcpSocketChannel   ChannelType;
         typedef RPC_TcpSocketListener  ListenerType;
         typedef RPC_Message            MessageType;
-        typedef RPC_Reactor<>          ReactorType;
+        typedef RPC_Proactor<>         ProactorType;
     }; // end of class RPC_TcpSocketService_Impl
     
     template<class Impl = RPC_TcpSocketService_Impl>
@@ -401,7 +492,7 @@ namespace rpc
         typedef typename Impl::ChannelType*   ChannelPtr;
         typedef typename Impl::ListenerType*  ListenerPtr;
         typedef typename Impl::MessageType    MessageType;
-        typedef typename Impl::ReactorType    ReactorType;
+        typedef typename Impl::ProactorType   ProactorType;
         
         struct AsyncTask
         {
@@ -417,9 +508,10 @@ namespace rpc
         
     private:
         AsyncTaskQueue m_async_taks_queue;
-        ReactorType    m_reactor;
-        std::function<void (ListenerPtr, int)> m_accept_error_handler;
+        ProactorType   m_proactor;
         
+        std::function<void (ListenerPtr, int)> m_accept_error_handler;
+         
     private:
         RPC_Service(const RPC_Service&) = delete;
         RPC_Service& operator=(const RPC_Service&) = delete;
@@ -482,9 +574,10 @@ namespace rpc {
         
     } // end of RPC_TcpSocketListener::open
     
-    
     template<class Impl>
-    RPC_Service<Impl>::RPC_Service() {}
+    RPC_Service<Impl>::RPC_Service() 
+    {
+    }
     
     template<class Impl>
     RPC_Service<Impl>::~RPC_Service() {}
@@ -502,7 +595,7 @@ namespace rpc {
         }
         
         // 注册到Reactor
-        isok = m_reactor.reg(ptrListener);
+        isok = m_proactor.reg(ptrListener);
         if ( !isok ) {
             printf("[ERROR] RPC_Service::open_listener, failed reg\n");
             delete ptrListener;
@@ -536,14 +629,14 @@ namespace rpc {
             m_async_taks_queue.pop();
             
             if ( task->task_type == Task_AsyncAccept) {
-                m_reactor.add_read(task->p_listener, task->timeout);
+                m_proactor.add_read(task->p_listener, task->timeout);
             } else {
                 printf("[ERROR] RPC_Service::run, unknown task type %d\n", task->task_type);
             }
             delete task;
         }
         
-        int ret = m_reactor.run();
+        int ret = m_proactor.run();
         if ( ret < 0 ) {
             printf("[ERROR] RPC_Service::run, reactor run failed\n");
         }
