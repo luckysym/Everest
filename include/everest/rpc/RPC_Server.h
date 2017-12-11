@@ -14,7 +14,8 @@
 #include <functional>
 #include <stdexcept>
 #include <queue>
-
+#include <map>
+#include <unordered_map>
 
 namespace everest
 {
@@ -23,7 +24,6 @@ namespace everest
     public:
         static int64_t get_timestamp() { throw std::runtime_error("DateTime::get_timestamp()"); }
     }; // end of namespace 
-
 
 namespace rpc 
 {
@@ -60,24 +60,153 @@ namespace rpc
     
     class RPC_TcpSocketChannel {};
     
-    class RPC_TcpSocketListener  : public RPC_SocketObject
+    class RPC_SocketListener : public RPC_SocketObject
     {
     public:
-        RPC_TcpSocketListener() : RPC_SocketObject(net::Protocol::tcp4(), Type_Listener) {}
+        RPC_SocketListener(const net::Protocol& proto) : RPC_SocketObject(proto, Type_Listener) 
+        {}
+    };
+    
+    class RPC_TcpSocketListener  : public RPC_SocketListener
+    {
+    public:
+        RPC_TcpSocketListener() : RPC_SocketListener(net::Protocol::tcp4()) {}
     
         bool open(const char * endpoint);
     }; // end of class RPC_TcpSocketListener
     
+
     /**
      * 超时队列
      */
     class RPC_TaskTimeoutQueue
     {
     public:
+        class TaskOwner;
+    
+        class Task 
+        {
+        private:
+            TaskOwner * m_owner_ref;
+            int         m_type;
+            int64_t     m_expire_time;
+        
+        public:
+            Task(TaskOwner *owner, int type, int64_t exp) 
+                : m_owner_ref(owner), m_type(type), m_expire_time(exp) {}
+        
+            int64_t expire_time() const { 
+                throw std::runtime_error("RPC_TaskTimeoutQueue::Task::expire_time not impl");
+                return 0;
+            }
+            
+            int type() const { return m_type; }
+        };
+        
+        class TaskOwner 
+        {
+        private:
+            RPC_SocketObject * m_owner_ref;
+            std::queue<Task> m_wr_queue;  // 读任务队列
+            std::queue<Task> m_rd_queue;  // 写任务队列
+            
+        public:
+            TaskOwner(RPC_SocketObject* p) : m_owner_ref(p) {}
+        
+            Task * get_front_task(int type) 
+            {
+                std::queue<Task> * queue = nullptr;
+                if ( type == RPC_Constants::Read ) queue = &m_rd_queue;
+                else if ( type == RPC_Constants::Write) queue = &m_wr_queue;
+                else {
+                    printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::get_front_task, wrong type\n");
+                    return nullptr;
+                }
+                
+                if ( !queue->empty() ) return &queue->front();
+                else {
+                    printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::get_front_task, no task\n");
+                    return nullptr;
+                }
+            }
+            
+            Task * push_task(const Task &task) 
+            {
+                int type = task.type();
+                if ( type == RPC_Constants::Read ) {
+                    m_rd_queue.push(task);
+                    return &m_rd_queue.back();
+                } else if ( type == RPC_Constants::Write ) {
+                    m_wr_queue.push(task);
+                    return &m_wr_queue.back();
+                } else {
+                    printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::push_task, wrong task type %d\n", type);
+                    return nullptr;
+                }
+            }
+        }; // end of class TaskOwner
+        
+    private:
+        typedef std::multimap<int64_t, Task *>  TimeoutTaskMap;
+        typedef std::unordered_map<RPC_SocketObject *, TaskOwner*> TaskOwnerMap;
+        
+    private:
+        TimeoutTaskMap  m_timeout_map;
+        TaskOwnerMap    m_owner_map;
         
     public:
-        int front() const { return 0; }
-        void pop_front() {}
+    
+        bool empty() const {
+            throw std::runtime_error("RPC_TaskTimeoutQueue::TaskOwner::empty not impl");
+            return nullptr;
+        }
+        
+        TaskOwner * add_owner(RPC_SocketObject * p) {
+            TaskOwnerMap::iterator it = m_owner_map.find(p);
+            if ( it == m_owner_map.end() ) {
+                TaskOwner * owner = new TaskOwner(p);
+                std::pair<TaskOwnerMap::iterator, bool > result 
+                    = m_owner_map.insert(TaskOwnerMap::value_type(p, owner));
+                if ( result.second ) return owner;
+                else {
+                    printf("[ERROR] RPC_TaskTimeoutQueue::add_owner, add failed\n");
+                    return nullptr;
+                }
+            } else {
+                return it->second;
+            }
+        }
+        
+        TaskOwner * find_owner(RPC_SocketObject * p) {
+            TaskOwnerMap::iterator it = m_owner_map.find(p);
+            if ( it != m_owner_map.end() ) {
+                return it->second;
+            } else {
+                printf("[ERROR] RPC_TaskTimeoutQueue::find_owner, not found\n");
+                return nullptr;
+            }
+        }
+        
+        Task * push_task(TaskOwner * owner, int type, int64_t expire) 
+        {
+            Task * p_task = owner->push_task(Task(owner, type, expire));
+            if ( p_task ) return p_task;
+            else {
+                printf("[ERROR] RPC_TaskTimeoutQueue::push_task, push task fail\n");
+                return nullptr;
+            }
+        }
+        
+        Task * get_front_timeout() 
+        {
+            throw std::runtime_error("RPC_TaskTimeoutQueue::get_front_timeout not impl");
+            return nullptr;
+        }
+        
+        void pop_front_timeout() 
+        {
+            throw std::runtime_error("RPC_TaskTimeoutQueue::pop_front_timeout not impl");
+        }
     }; // end of class RPC_TimeoutQueue
     
     template<class Poller = net::EPoller, class TaskTimeoutQueue = RPC_TaskTimeoutQueue>
@@ -88,10 +217,13 @@ namespace rpc
         TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
         
     public:
-
         bool reg(RPC_SocketObject *sockobj) 
         {
-            bool isok = m_poller.add(sockobj->get_socket().handle(), 0, sockobj);
+            // 任务超时队列中注册socket对象
+            typename TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.add_owner(sockobj);
+            assert(p_owner);
+            
+            bool isok = m_poller.add(sockobj->get_socket().handle(), 0, p_owner);
             if ( !isok ) {
                 printf("[ERROR] RPC_Proactor::reg(sockobj) error\n");
                 return false;
@@ -99,9 +231,19 @@ namespace rpc
             return true;
         }
 
-        bool add_read(RPC_SocketObject *sockobj, int timeout)
+        bool add_read(RPC_SocketObject *sockobj, int64_t expire)
         {
-            bool isok = m_poller.set(sockobj->get_socket().handle(), Poller::Event_Read, sockobj);
+            typename TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
+            assert(p_owner);
+            
+            bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Read, expire); 
+            assert( isok );
+            
+            int events = 0;
+            if ( p_owner->get_front_task(RPC_Constants::Read ) != nullptr ) events |= Poller::Event_Read;
+            if ( p_owner->get_front_task(RPC_Constants::Write ) != nullptr ) events |= Poller::Event_Write;
+            
+            isok = m_poller.set(sockobj->get_socket().handle(), events, p_owner);
             if ( !isok ) {
                 printf("[ERROR] RPC_Proactor::add_read(sockobj) error\n");
                 return false;
@@ -113,52 +255,69 @@ namespace rpc
     
         int run() {
             int64_t now = DateTime::get_timestamp();
-            // TODO 获取任务，计算超时
-            int timeout = 0;
-
-
+            if ( m_task_timeout_queue.empty() ) {
+                printf("[INFO] RPC_Proactor::run, no task \n");
+                return 0;
+            }
             
+            bool  need_clear_timeout = false;   // 是否在wait后需要清理超时任务
+            
+            typename TaskTimeoutQueue::Task * p_task = m_task_timeout_queue.get_front_timeout();
+            int timeout = (int)((p_task->expire_time() - now) / 1000);
+            if ( timeout < 0 ) {
+                need_clear_timeout = true;
+                timeout = 0;
+            }
             int ret = m_poller.wait(timeout);
             if ( ret > 0 ) {
-                // 有事件发生
-                typename Poller::Iterator iter = m_poller.events();
-                while ( iter.has_next() ) {
-                    typename Poller::Event e = iter.next();
-                    if ( e.events() & Poller::Event_Read ) {
-                        RPC_SocketObject * p_sock = (RPC_SocketObject*)e.data();
-                        if ( p_sock->type() == RPC_SocketObject::Type_Listener ) {
-                            // int ret = this->on_acceptable((RPC_SocketListener*)p_sock);
-                            if ( ret == RPC_Constants::Finish ) {
-                                // TODO 接下去怎么做
-                            } else {
-                                throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
-                            }
-                        } else {
-                            throw std::runtime_error("RPC_Proactor::run, bad socket type");
-                        }
-                    } // end if
-                } // end while
+                this->process_events();
+                if ( need_clear_timeout ) this->clear_timeout_task();
             } else if ( ret == 0 ) {
                 // 超时，并没有事件发生
                 printf("[ERROR] RPC_Proactor::run, poller wait timeout %d ms\n", timeout);
+                this->clear_timeout_task();
             } else {
                 // poller wait出现错误
                 printf("[ERROR] RPC_Proactor::run, poller wait error\n");
             }
             return ret;
-            
-            return false;
         }
+        
     private:
-        int on_acceptable(RPC_TcpSocketListener * plistener) {
+        int on_acceptable(RPC_SocketListener * plistener) {
             printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
             return RPC_Constants::Finish;
         }
         
-        int on_accept_timeout(RPC_TcpSocketListener * plistener) {
+        int on_accept_timeout(RPC_SocketListener * plistener) {
             printf("[ERROR] RPC_Proactor::on_accept_timeout, poller wait error\n");
             return RPC_Constants::Finish;
         }
+        
+        void clear_timeout_task() {
+            printf("[ERROR] RPC_Proactor::clear_timeout_task, poller wait error\n");
+        }
+        
+        void process_events() {
+            // 有事件发生
+            typename Poller::Iterator iter = m_poller.events();
+            while ( iter.has_next() ) {
+                typename Poller::Event e = iter.next();
+                if ( e.events() & Poller::Event_Read ) {
+                    RPC_SocketObject * p_sock = (RPC_SocketObject*)e.data();
+                    if ( p_sock->type() == RPC_SocketObject::Type_Listener ) {
+                        int ret = this->on_acceptable((RPC_TcpSocketListener*)p_sock);
+                        if ( ret == RPC_Constants::Finish ) {
+                            // TODO 接下去怎么做
+                        } else {
+                            throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
+                        }
+                    } else {
+                        throw std::runtime_error("RPC_Proactor::run, bad socket type");
+                    }
+                } // end if
+            } // end while
+        } // end of process_events
     }; // class RPC_Proactor
     
     class RPC_Message {};
@@ -336,7 +495,5 @@ namespace rpc {
     
 } // end of namespace rpc 
 } // end of namespace everest
-
-
 
 #endif // INCLUDE_EVEREST_RPC_RPC_SERVER_H
