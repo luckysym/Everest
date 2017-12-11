@@ -16,6 +16,7 @@ namespace net
     public:
         static const int Event_None = 0;
         static const int Event_Read = EPOLLIN;
+        static const int Event_Write = EPOLLOUT;
         
         static const int Step_Size = 1024;
         
