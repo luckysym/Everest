@@ -96,17 +96,19 @@ void * run_server(void *)
     rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener("127.0.0.1:9999");
     if ( !ptrListener ) { throw std::runtime_error("open listener failed"); } 
     
-    bool isok = server.post_accept(ptrListener);
+    bool isok = server.post_accept(ptrListener, 5000);
     if ( !isok ) { throw std::runtime_error("post accept failed");}
     
     int result = server.run();
     if ( result < 0 ) { throw std::runtime_error("server run failed");}
     
+    printf("Server Exit\n");
     return nullptr;
 }
 
 void * run_client(void *)
 {
     rpc::RPC_Service<> client;
+    
     return nullptr;
 }

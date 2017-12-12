@@ -1,13 +1,14 @@
 #ifndef INCLUDE_EVEREST_RPC_RPC_SERVER_H
 #define INCLUDE_EVEREST_RPC_RPC_SERVER_H
 
+#include <everest/date_time.h>
 #include <everest/net/sock_addr.h>
 #include <everest/net/socket.h>
 #include <everest/net/epoller.h>
+#include <everest/rpc/RPC_Socket.h>
 
 #include <assert.h>
 #include <sys/epoll.h>
-#include <sys/time.h>
 
 #include <memory>
 #include <unordered_set>
@@ -20,70 +21,8 @@
 
 namespace everest
 {
-    class DateTime
-    {
-    public:
-        static int64_t get_timestamp() {
-            struct timeval tv;
-            int ret = ::gettimeofday(&tv, nullptr);
-            assert(ret == 0);
-            return (int64_t)(tv.tv_sec * 1000000LL + tv.tv_usec);
-        } // end of get_timestamp
-    }; // end of namespace 
-
 namespace rpc 
 {
-    /**
-     * RPC过程常量集合
-     */
-    struct RPC_Constants
-    {
-        static const int Finish = 0;
-        
-        static const int Read   = 1;
-        static const int Write  = 2;
-        static const int Accept = 4;
-        
-        static const int64_t Max_Expire_Time = INT64_MAX;
-    }; // end of RPC_Constants
-    
-    class RPC_SocketObject 
-    {
-    public:
-        static const int Type_Listener = 1;
-        static const int Type_Channel  = 2;
-        
-    protected:
-        net::Socket m_socket;
-        int         m_type;
-    public:
-        RPC_SocketObject(const net::Protocol& proto, int type) 
-            : m_socket(proto), m_type(type) {}
-        
-        net::Socket& get_socket() { return m_socket; }
-        const net::Socket& get_socket() const { return m_socket; }
-        
-        int type() const { return m_type; }
-    }; // end of class RPC_TcpSocketListener
-    
-    class RPC_TcpSocketChannel {};
-    
-    class RPC_SocketListener : public RPC_SocketObject
-    {
-    public:
-        RPC_SocketListener(const net::Protocol& proto) : RPC_SocketObject(proto, Type_Listener) 
-        {}
-    };
-    
-    class RPC_TcpSocketListener  : public RPC_SocketListener
-    {
-    public:
-        RPC_TcpSocketListener() : RPC_SocketListener(net::Protocol::tcp4()) {}
-    
-        bool open(const char * endpoint);
-    }; // end of class RPC_TcpSocketListener
-    
-
     /**
      * 超时队列
      */
@@ -276,7 +215,7 @@ namespace rpc
             // m_task_timeout_queue.push(timeout);  // 放入超时队列
             return isok;
         }
-    
+
         int run() {
             int64_t now = DateTime::get_timestamp();
             if ( m_task_timeout_queue.empty() ) {
@@ -448,8 +387,7 @@ namespace rpc {
     } // end of RPC_TcpSocketListener::open
     
     template<class Impl>
-    RPC_Service<Impl>::RPC_Service() 
-    {}
+    RPC_Service<Impl>::RPC_Service() {}
     
     template<class Impl>
     RPC_Service<Impl>::~RPC_Service() {}
