@@ -314,9 +314,10 @@ namespace rpc
             MessageType  message;
             int64_t      expire_time;
         };  // end struct AsyncTask 
-        typedef std::queue<AsyncTask*>         AsyncTaskQueue;
+        typedef std::queue<AsyncTask>         AsyncTaskQueue;
         
         static const int Task_AsyncAccept  = 1;
+        static const int Task_AsyncWrite   = 2;
         
     private:
         AsyncTaskQueue m_async_taks_queue;
@@ -360,32 +361,6 @@ namespace rpc
 namespace everest {
 namespace rpc {
     
-    bool RPC_TcpSocketListener::open(const char * endpoint)
-    {
-        net::SocketAddress cSockaddr;
-        net::InetAdderssAdapter addr_adapter(cSockaddr);
-        bool isok = addr_adapter.from_string(endpoint);
-        if ( !isok ) {
-            printf("[ERROR] RPC_TcpSocketListener::open, bad endpoint address, %s\n", endpoint);
-            return false;
-        }
-        
-        isok = m_socket.bind(cSockaddr);
-        if ( !isok ) {
-            printf("[ERROR] RPC_TcpSocketListener::open, bind failed, %s\n", endpoint);
-            return false;
-        }
-        
-        isok = m_socket.listen();
-        if ( !isok ) {
-            printf("[ERROR] RPC_TcpSocketListener::open, listen failed, %s\n", endpoint);
-            return false;
-        }
-        printf("[TRACE] RPC_TcpSocketListener::open, result %s\n", isok?"true":"false");
-        return isok;
-        
-    } // end of RPC_TcpSocketListener::open
-    
     template<class Impl>
     RPC_Service<Impl>::RPC_Service() {}
     
@@ -420,12 +395,36 @@ namespace rpc {
     bool RPC_Service<Impl>::post_accept(ListenerPtr listener, int timeout)
     {
         int64_t now = DateTime::get_timestamp();
-        AsyncTask *task = new AsyncTask;
+        AsyncTask task;
         
-        task->task_type   = Task_AsyncAccept;
-        task->p_listener  = listener;
-        if ( timeout < 0 ) task->expire_time = RPC_Constants::Max_Expire_Time;
-        else task->expire_time = now + timeout * 1000;
+        task.task_type   = Task_AsyncAccept;
+        task.p_listener  = listener;
+        if ( timeout < 0 ) task.expire_time = RPC_Constants::Max_Expire_Time;
+        else task.expire_time = now + timeout * 1000;
+        
+        // todo: make lock
+        m_async_taks_queue.push(task);
+        
+        return true;
+    }
+    
+    template<class Impl>
+    bool RPC_Service<Impl>::open_channel(const char * endpoint, int timeout) 
+    {
+        int64_t now = DateTime::get_timestamp();
+        ChannelPtr p_channel = new ChannelType;
+        
+        bool isok = p_channel->open(endpoint);
+        if ( !isok ) {
+            printf("[ERROR] RPC_Service<Impl>::open_channel, failed to open channel, %d, %s\n", timeout, endpoint);
+            return false;
+        }
+
+        AsyncTask task;
+        task.task_type  = Task_AsyncWrite;
+        task.p_channel  = p_channel;
+        if ( timeout < 0 ) task.expire_time = RPC_Constants::Max_Expire_Time;
+        else task.expire_time = now + timeout * 1000;
         
         // todo: make lock
         m_async_taks_queue.push(task);
@@ -438,16 +437,15 @@ namespace rpc {
     {
         bool isok;
         while ( !m_async_taks_queue.empty() ) {
-            AsyncTask * task = m_async_taks_queue.front();
-            m_async_taks_queue.pop();
+            AsyncTask & task = m_async_taks_queue.front();
             
-            if ( task->task_type == Task_AsyncAccept) {
+            if ( task.task_type == Task_AsyncAccept) {
                 printf("[TRACE] RPC_Service::run, new accept task\n");
-                m_proactor.add_read(task->p_listener, task->expire_time);
+                m_proactor.add_read(task.p_listener, task.expire_time);
             } else {
-                printf("[ERROR] RPC_Service::run, unknown task type %d\n", task->task_type);
+                printf("[ERROR] RPC_Service::run, unknown task type %d\n", task.task_type);
             }
-            delete task;
+            m_async_taks_queue.pop();
         }
         
         int ret = m_proactor.run();

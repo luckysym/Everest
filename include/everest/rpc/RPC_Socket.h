@@ -3,6 +3,8 @@
 
 #pragma once 
 
+#include <stdexcept>
+
 namespace everest
 {
 namespace rpc 
@@ -41,14 +43,30 @@ namespace rpc
         int type() const { return m_type; }
     }; // end of class RPC_TcpSocketListener
     
-    class RPC_TcpSocketChannel {};
-    
     class RPC_SocketListener : public RPC_SocketObject
     {
     public:
         RPC_SocketListener(const net::Protocol& proto) 
             : RPC_SocketObject(proto, Type_Listener) 
         {}
+    };
+    
+    class RPC_SocketChannel : public RPC_SocketObject 
+    {
+    public: 
+        RPC_SocketChannel(const net::Protocol& proto)
+            : RPC_SocketObject(proto, Type_Channel)
+        {}
+    };
+    
+    class RPC_TcpSocketChannel : public RPC_SocketChannel 
+    {
+    public:
+        RPC_TcpSocketChannel()
+            : RPC_SocketChannel(net::Protocol::tcp4())
+        {}
+        
+        bool open(const char *endpoint);
     };
     
     class RPC_TcpSocketListener  : public RPC_SocketListener
@@ -60,6 +78,53 @@ namespace rpc
     
         bool open(const char * endpoint);
     }; // end of class RPC_TcpSocketListener
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// IMPLEMENTATION 
+        
+    bool RPC_TcpSocketListener::open(const char * endpoint)
+    {
+        net::SocketAddress cSockaddr;
+        net::InetAdderssAdapter addr_adapter(cSockaddr);
+        bool isok = addr_adapter.from_string(endpoint);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, bad endpoint address, %s\n", endpoint);
+            return false;
+        }
+        
+        isok = m_socket.bind(cSockaddr);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, bind failed, %s\n", endpoint);
+            return false;
+        }
+        
+        isok = m_socket.listen();
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketListener::open, listen failed, %s\n", endpoint);
+            return false;
+        }
+        printf("[TRACE] RPC_TcpSocketListener::open, result %s\n", isok?"true":"false");
+        return isok;
+        
+    } // end of RPC_TcpSocketListener::open
+    
+    bool RPC_TcpSocketChannel::open(const char * endpoint)
+    {
+        net::SocketAddress addr;
+        net::InetAdderssAdapter addr_adapter(addr);
+        bool isok = addr_adapter.from_string(endpoint);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketChannel::open, bad endpoint address, %s\n", endpoint);
+            return false;
+        }
+        isok = m_socket.connect(addr);
+        if ( !isok ) {
+            printf("[ERROR] RPC_TcpSocketChannel::open, connect failed, %s\n", endpoint);
+            return false;
+        }
+        return true;
+    }
     
 } // end of namespace rpc 
 } // end of namespace everest 

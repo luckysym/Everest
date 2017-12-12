@@ -52,6 +52,7 @@ namespace net
         int handle() const { return m_fd; }
         bool bind(const SocketAddress& addr);
         bool listen();
+        bool connect(const SocketAddress& addr);
     }; // end of class Socket
 
     Socket::Socket(const Protocol &proto) 
@@ -91,6 +92,21 @@ namespace net
         }
         return true;
     } // end of Socket::listen() 
+    
+    bool Socket::connect(const SocketAddress& addr) 
+    {
+        int ret = ::connect(m_fd, &(const sockaddr&)addr, addr.length());
+        if ( ret == 0 ) return true;
+        else if ( ret < 0 ) {
+            if ( errno == EINPROGRESS ) {
+                printf("[INFO] Socket::connect, conn in progress\n");
+                return true;
+            } else {
+                printf("[ERROR] Socket::connect, conn ok, %d, %s\n", errno, strerror(errno));
+                return false;
+            }
+        }
+    }
     
 } // end of namespace net 
 } // end of namespace everest 

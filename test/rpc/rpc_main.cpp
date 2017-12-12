@@ -25,6 +25,8 @@ int client_result = 0;
 pthread_t server_tid = 0;
 pthread_t client_tid = 0;
 
+#define RPC_LOCAL_ENDPOINT   "127.0.0.1:9999"
+
 int main(int argc, char **argv)
 {
     using namespace std;
@@ -93,7 +95,7 @@ void * run_server(void *)
 {
     rpc::RPC_Service<> server;
     
-    rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener("127.0.0.1:9999");
+    rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener(RPC_LOCAL_ENDPOINT);
     if ( !ptrListener ) { throw std::runtime_error("open listener failed"); } 
     
     bool isok = server.post_accept(ptrListener, 5000);
@@ -109,6 +111,8 @@ void * run_server(void *)
 void * run_client(void *)
 {
     rpc::RPC_Service<> client;
+    bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
+    
     
     return nullptr;
 }
