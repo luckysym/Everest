@@ -156,8 +156,6 @@ namespace net
         }
         return ret;
     }
-    
-    
 } // end of namespace net 
 } // end of namespace everest 
 

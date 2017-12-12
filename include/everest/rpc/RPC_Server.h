@@ -7,6 +7,7 @@
 
 #include <assert.h>
 #include <sys/epoll.h>
+#include <sys/time.h>
 
 #include <memory>
 #include <unordered_set>
@@ -22,7 +23,12 @@ namespace everest
     class DateTime
     {
     public:
-        static int64_t get_timestamp() { throw std::runtime_error("DateTime::get_timestamp()"); }
+        static int64_t get_timestamp() {
+            struct timeval tv;
+            int ret = ::gettimeofday(&tv, nullptr);
+            assert(ret == 0);
+            return (int64_t)(tv.tv_sec * 1000000LL + tv.tv_usec);
+        } // end of get_timestamp
     }; // end of namespace 
 
 namespace rpc 
@@ -37,6 +43,8 @@ namespace rpc
         static const int Read   = 1;
         static const int Write  = 2;
         static const int Accept = 4;
+        
+        static const int64_t Max_Expire_Time = INT64_MAX;
     }; // end of RPC_Constants
     
     class RPC_SocketObject 
@@ -95,12 +103,11 @@ namespace rpc
             Task(TaskOwner *owner, int type, int64_t exp) 
                 : m_owner_ref(owner), m_type(type), m_expire_time(exp) {}
         
-            int64_t expire_time() const { 
-                throw std::runtime_error("RPC_TaskTimeoutQueue::Task::expire_time not impl");
-                return 0;
-            }
+            int64_t expire_time() const {  return m_expire_time; }
             
             int type() const { return m_type; }
+            
+            TaskOwner * owner() { return m_owner_ref; }
         };
         
         class TaskOwner 
@@ -123,6 +130,9 @@ namespace rpc
                     return nullptr;
                 }
                 
+                printf("[TRACE] RPC_TaskTimeoutQueue::TaskOwner::get_front_task, type %d, empty %s\n", 
+                    type, queue->empty()?"true":"false");
+                
                 if ( !queue->empty() ) return &queue->front();
                 else {
                     printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::get_front_task, no task\n");
@@ -132,6 +142,7 @@ namespace rpc
             
             Task * push_task(const Task &task) 
             {
+                printf("[TRACE] RPC_TaskTimeoutQueue::TaskOwner::push_task, task type %d\n", task.type());
                 int type = task.type();
                 if ( type == RPC_Constants::Read ) {
                     m_rd_queue.push(task);
@@ -143,7 +154,7 @@ namespace rpc
                     printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::push_task, wrong task type %d\n", type);
                     return nullptr;
                 }
-            }
+            } // end of push_task
         }; // end of class TaskOwner
         
     private:
@@ -157,8 +168,7 @@ namespace rpc
     public:
     
         bool empty() const {
-            throw std::runtime_error("RPC_TaskTimeoutQueue::TaskOwner::empty not impl");
-            return nullptr;
+            return m_timeout_map.empty();
         }
         
         TaskOwner * add_owner(RPC_SocketObject * p) {
@@ -189,19 +199,30 @@ namespace rpc
         
         Task * push_task(TaskOwner * owner, int type, int64_t expire) 
         {
+            // 先写入owner任务队列
             Task * p_task = owner->push_task(Task(owner, type, expire));
-            if ( p_task ) return p_task;
-            else {
+            if ( !p_task ) {
                 printf("[ERROR] RPC_TaskTimeoutQueue::push_task, push task fail\n");
                 return nullptr;
             }
-        }
+            
+            printf("[TRACE] RPC_TaskTimeoutQueue::push_task, insert timeout map\n");
+            // 再写入timeout队列
+            TimeoutTaskMap::iterator it = m_timeout_map.insert(TimeoutTaskMap::value_type(expire, p_task));
+            assert(it != m_timeout_map.end());
+            
+            return p_task;
+        } // end of push_task
         
         Task * get_front_timeout() 
         {
-            throw std::runtime_error("RPC_TaskTimeoutQueue::get_front_timeout not impl");
-            return nullptr;
-        }
+            if ( !m_timeout_map.empty() ) {
+                return m_timeout_map.begin()->second;
+            } else {
+                printf("[ERROR] RPC_TaskTimeoutQueue::get_front_timeout, no front timeout task\n");
+                return nullptr;
+            }
+        }  // end of get_front_timeout
         
         void pop_front_timeout() 
         {
@@ -239,10 +260,13 @@ namespace rpc
             bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Read, expire); 
             assert( isok );
             
+            printf("[TRACE] RPC_Proactor::add_read(sockobj), expire %lld\n", expire);
+            
             int events = 0;
             if ( p_owner->get_front_task(RPC_Constants::Read ) != nullptr ) events |= Poller::Event_Read;
             if ( p_owner->get_front_task(RPC_Constants::Write ) != nullptr ) events |= Poller::Event_Write;
             
+            printf("[TRACE] RPC_Proactor::add_read, poller set, event %d\n", events);
             isok = m_poller.set(sockobj->get_socket().handle(), events, p_owner);
             if ( !isok ) {
                 printf("[ERROR] RPC_Proactor::add_read(sockobj) error\n");
@@ -349,7 +373,7 @@ namespace rpc
             ChannelPtr   p_channel;
             ListenerPtr  p_listener;
             MessageType  message;
-            int          timeout;
+            int64_t      expire_time;
         };  // end struct AsyncTask 
         typedef std::queue<AsyncTask*>         AsyncTaskQueue;
         
@@ -384,7 +408,7 @@ namespace rpc
         ListenerPtr open_listener(const char * endpoint);
         bool        close_listener(ListenerPtr listener);
         
-        bool        post_accept(ListenerPtr listener);
+        bool        post_accept(ListenerPtr listener, int timeout);
         bool        post_receive(ChannelPtr channel, MessageType & rMessage, int timeout);
         bool        post_send(ChannelPtr channel, MessageType & rMessage, int timeout);
         
@@ -425,8 +449,7 @@ namespace rpc {
     
     template<class Impl>
     RPC_Service<Impl>::RPC_Service() 
-    {
-    }
+    {}
     
     template<class Impl>
     RPC_Service<Impl>::~RPC_Service() {}
@@ -456,13 +479,15 @@ namespace rpc {
     } // end of RPC_Service<Impl>::open_listener
     
     template<class Impl>
-    bool RPC_Service<Impl>::post_accept(ListenerPtr listener)
+    bool RPC_Service<Impl>::post_accept(ListenerPtr listener, int timeout)
     {
+        int64_t now = DateTime::get_timestamp();
         AsyncTask *task = new AsyncTask;
         
-        task->task_type  = Task_AsyncAccept;
-        task->p_listener = listener;
-        task->timeout    = -1;
+        task->task_type   = Task_AsyncAccept;
+        task->p_listener  = listener;
+        if ( timeout < 0 ) task->expire_time = RPC_Constants::Max_Expire_Time;
+        else task->expire_time = now + timeout * 1000;
         
         // todo: make lock
         m_async_taks_queue.push(task);
@@ -479,7 +504,8 @@ namespace rpc {
             m_async_taks_queue.pop();
             
             if ( task->task_type == Task_AsyncAccept) {
-                m_proactor.add_read(task->p_listener, task->timeout);
+                printf("[TRACE] RPC_Service::run, new accept task\n");
+                m_proactor.add_read(task->p_listener, task->expire_time);
             } else {
                 printf("[ERROR] RPC_Service::run, unknown task type %d\n", task->task_type);
             }
