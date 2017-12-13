@@ -47,12 +47,16 @@ namespace net
     
     public:
         Socket(const Protocol &proto);
+        Socket(const Protocol &proto, bool create);
         ~Socket();
     
-        int handle() const { return m_fd; }
+        int  handle() const { return m_fd; }
+        void attach(int newfd) { m_fd = newfd; }
+        void detach() { m_fd = -1; }
         bool bind(const SocketAddress& addr);
         bool listen();
         bool connect(const SocketAddress& addr);
+        bool accept(Socket &sock, SocketAddress &addr);
     }; // end of class Socket
 
     Socket::Socket(const Protocol &proto) 
@@ -61,6 +65,19 @@ namespace net
         if ( m_fd < 0 ) {
             printf("[ERROR] Socket::Socket, failed to create socket, %d, %s\n",
                 errno, strerror(errno));
+        }
+    }
+    
+    Socket::Socket(const Protocol &proto, bool create)
+    {
+        if ( create ) {
+            m_fd = ::socket(proto.domain(), proto.type(), proto.protocol());
+            if ( m_fd < 0 ) {
+                printf("[ERROR] Socket::Socket, failed to create socket, %d, %s\n",
+                    errno, strerror(errno));
+            }
+        } else {
+            m_fd = -1;
         }
     }
     
@@ -106,6 +123,17 @@ namespace net
                 return false;
             }
         }
+    }
+    
+    bool Socket::accept(Socket &sock, SocketAddress &addr)
+    {
+        int fd = ::accept(m_fd, &(sockaddr &)addr, &addr.length());
+        if ( fd < 0 ) {
+            printf("[ERROR] Socket::accept, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        sock.attach(fd);
+        return true;
     }
     
 } // end of namespace net 

@@ -10,11 +10,12 @@ namespace everest
 namespace rpc 
 {
     /**
-     * RPC过程常量集合
+     * RPC杩囩▼甯搁噺闆嗗悎
      */
     struct RPC_Constants
     {
-        static const int Finish = 0;
+        static const int Ok     = 0;
+        static const int Fail   = -1;
         
         static const int Read   = 1;
         static const int Write  = 2;
@@ -23,6 +24,8 @@ namespace rpc
         static const int64_t Max_Expire_Time = INT64_MAX;
     }; // end of RPC_Constants
     
+    class RPC_SocketChannel;
+    
     class RPC_SocketObject 
     {
     public:
@@ -30,60 +33,62 @@ namespace rpc
         static const int Type_Channel  = 2;
         
     protected:
-        net::Socket m_socket;
-        int         m_type;
-        
+        net::Protocol      m_proto;
+        net::Socket        m_socket;
+        net::SocketAddress m_addr;
+        int                m_type;
+
     public:
         RPC_SocketObject(const net::Protocol& proto, int type) 
-            : m_socket(proto), m_type(type) {}
+            : m_proto(proto), m_socket(proto), m_type(type) {}
         
+        RPC_SocketObject(const net::Protocol& proto, int type, 
+                         net::Socket &sock, net::SocketAddress &addr) 
+            : m_proto(proto), m_socket(proto, false), m_type(type), m_addr(addr)
+        {
+            m_socket.attach(sock.handle());
+            sock.detach();
+        }
+
         net::Socket& get_socket() { return m_socket; }
+        
         const net::Socket& get_socket() const { return m_socket; }
         
         int type() const { return m_type; }
+        
     }; // end of class RPC_TcpSocketListener
-    
-    class RPC_SocketListener : public RPC_SocketObject
-    {
-    public:
-        RPC_SocketListener(const net::Protocol& proto) 
-            : RPC_SocketObject(proto, Type_Listener) 
-        {}
-    };
     
     class RPC_SocketChannel : public RPC_SocketObject 
     {
     public: 
-        RPC_SocketChannel(const net::Protocol& proto)
-            : RPC_SocketObject(proto, Type_Channel)
-        {}
-    };
-    
-    class RPC_TcpSocketChannel : public RPC_SocketChannel 
-    {
-    public:
-        RPC_TcpSocketChannel()
-            : RPC_SocketChannel(net::Protocol::tcp4())
+        RPC_SocketChannel()
+            : RPC_SocketObject(net::Protocol::tcp4(), Type_Channel)
         {}
         
-        bool open(const char *endpoint);
+        RPC_SocketChannel(net::Socket &sock, net::SocketAddress &addr)
+            : RPC_SocketObject(net::Protocol::tcp4(), Type_Channel, sock, addr)
+        {}
+        
+        bool open(const char * endpoint);
     };
     
-    class RPC_TcpSocketListener  : public RPC_SocketListener
+    class RPC_SocketListener : public RPC_SocketObject
     {
     public:
-        RPC_TcpSocketListener() 
-            : RPC_SocketListener(net::Protocol::tcp4()) 
+        RPC_SocketListener() 
+            : RPC_SocketObject(net::Protocol::tcp4(), Type_Listener) 
         {}
-    
-        bool open(const char * endpoint);
-    }; // end of class RPC_TcpSocketListener
+        
+        bool                open(const char * endpoint);
+        RPC_SocketChannel * accept();
+    };
     
     
 ////////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION 
         
-    bool RPC_TcpSocketListener::open(const char * endpoint)
+    inline 
+    bool RPC_SocketListener::open(const char * endpoint)
     {
         net::SocketAddress cSockaddr;
         net::InetAdderssAdapter addr_adapter(cSockaddr);
@@ -107,9 +112,10 @@ namespace rpc
         printf("[TRACE] RPC_TcpSocketListener::open, result %s\n", isok?"true":"false");
         return isok;
         
-    } // end of RPC_TcpSocketListener::open
+    } // end of RPC_SocketListener::open
     
-    bool RPC_TcpSocketChannel::open(const char * endpoint)
+    inline 
+    bool RPC_SocketChannel::open(const char * endpoint)
     {
         net::SocketAddress addr;
         net::InetAdderssAdapter addr_adapter(addr);
@@ -124,6 +130,21 @@ namespace rpc
             return false;
         }
         return true;
+    }
+    
+    inline 
+    RPC_SocketChannel * RPC_SocketListener::accept()
+    {
+        net::Socket        newsock(m_proto, false);  // 浠呬粎寤轰竴涓┖鐨剆ocket
+        net::SocketAddress addr;
+        
+        bool isok = m_socket.accept(newsock, addr);
+        if ( !isok ) {
+            printf("[ERROR] RPC_SocketListener::accept failed\n");
+            return nullptr;
+        }
+        printf("[ERROR] RPC_SocketListener::accept, new channel accepted, fd %d\n");
+        return (RPC_SocketChannel *) new RPC_SocketChannel(newsock, addr);
     }
     
 } // end of namespace rpc 

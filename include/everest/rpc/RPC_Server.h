@@ -52,12 +52,14 @@ namespace rpc
         class TaskOwner 
         {
         private:
-            RPC_SocketObject * m_owner_ref;
+            RPC_SocketObject * m_sock_ref;
             std::queue<Task> m_wr_queue;  // 读任务队列
             std::queue<Task> m_rd_queue;  // 写任务队列
             
         public:
-            TaskOwner(RPC_SocketObject* p) : m_owner_ref(p) {}
+            TaskOwner(RPC_SocketObject* p) : m_sock_ref(p) {}
+        
+            RPC_SocketObject * get_socket() const { return m_sock_ref; }
         
             Task * get_front_task(int type) 
             {
@@ -175,8 +177,13 @@ namespace rpc
     private:
         Poller           m_poller;
         TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
+        std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
         
     public:
+        
+        template<class Handler>
+        void set_accept_handler(const Handler &handler) { m_accept_handler = handler; }
+    
         bool reg(RPC_SocketObject *sockobj) 
         {
             // 任务超时队列中注册socket对象
@@ -248,13 +255,31 @@ namespace rpc
         
     private:
         int on_acceptable(RPC_SocketListener * plistener) {
-            printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
-            return RPC_Constants::Finish;
+            
+            RPC_SocketChannel * p_channel = plistener->accept();
+            if ( p_channel == nullptr ) {
+                this->m_accept_handler(plistener, p_channel, RPC_Constants::Fail);
+                printf("[ERROR] RPC_Proactor::on_acceptable, listener accept error\n");
+                return RPC_Constants::Fail;
+            }
+            
+            printf("[TRACE] RPC_Proactor::on_acceptable, listener %p, channel %p\n", plistener, p_channel);
+            int ret = this->m_accept_handler(plistener, p_channel, RPC_Constants::Ok);
+            if ( ret == RPC_Constants::Fail ) {
+                printf("[ERROR] RPC_Proactor::on_acceptable, call back return fail\n");
+                delete p_channel;
+            }
+            return ret;
         }
         
         int on_accept_timeout(RPC_SocketListener * plistener) {
             printf("[ERROR] RPC_Proactor::on_accept_timeout, poller wait error\n");
-            return RPC_Constants::Finish;
+            return RPC_Constants::Ok;
+        }
+        
+        int on_readable(RPC_SocketChannel *pchannel) {
+            printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
+            return RPC_Constants::Ok;
         }
         
         void clear_timeout_task() {
@@ -267,20 +292,38 @@ namespace rpc
             while ( iter.has_next() ) {
                 typename Poller::Event e = iter.next();
                 if ( e.events() & Poller::Event_Read ) {
-                    RPC_SocketObject * p_sock = (RPC_SocketObject*)e.data();
+                    typename TaskTimeoutQueue::TaskOwner * p_owner = (typename TaskTimeoutQueue::TaskOwner*)e.data();
+                    RPC_SocketObject *p_sock = p_owner->get_socket();
                     if ( p_sock->type() == RPC_SocketObject::Type_Listener ) {
-                        int ret = this->on_acceptable((RPC_TcpSocketListener*)p_sock);
-                        if ( ret == RPC_Constants::Finish ) {
+                        int ret = this->on_acceptable((RPC_SocketListener*)p_sock);
+                        if ( ret == RPC_Constants::Ok ) {
                             // TODO 接下去怎么做
+                            printf("[ERROR] RPC_Proactor::process_events, listener get Finish\n" );
+                        } else if ( ret == RPC_Constants::Fail ) { 
+                            printf("[ERROR] RPC_Proactor::process_events, listener get Fail\n" );
                         } else {
-                            throw std::runtime_error("RPC_Proactor::run, unknown callback returned value");
+                            throw std::runtime_error("RPC_Proactor::run, Listener unknown callback returned value");
+                        }
+                    } else if ( p_sock->type() == RPC_SocketObject::Type_Channel ) {
+                        int ret = this->on_readable((RPC_SocketChannel*)p_sock);
+                        if ( ret == RPC_Constants::Ok ) {
+                            // TODO 接下去怎么做
+                            printf("[ERROR] RPC_Proactor::process_events, channel get Finish\n" );
+                        } else {
+                            throw std::runtime_error("RPC_Proactor::run, Channel unknown callback returned value");
                         }
                     } else {
-                        throw std::runtime_error("RPC_Proactor::run, bad socket type");
+                        char buf[128];
+                        snprintf(buf, 128, "RPC_Proactor::run, bad socket type %d", p_sock->type());
+                        throw std::runtime_error(buf);
                     }
-                } // end if
+                } else {
+                    throw std::runtime_error("RPC_Proactor::run bad event type");
+                }// end if
             } // end while
+            printf("[TRACE] RPC_Proactor::process_events\n" );
         } // end of process_events
+        
     }; // class RPC_Proactor
     
     class RPC_Message {};
@@ -288,8 +331,8 @@ namespace rpc
     class RPC_TcpSocketService_Impl
     {
     public:
-        typedef RPC_TcpSocketChannel   ChannelType;
-        typedef RPC_TcpSocketListener  ListenerType;
+        typedef RPC_SocketChannel      ChannelType;
+        typedef RPC_SocketListener     ListenerType;
         typedef RPC_Message            MessageType;
         typedef RPC_Proactor<>         ProactorType;
     }; // end of class RPC_TcpSocketService_Impl
@@ -298,7 +341,6 @@ namespace rpc
     class RPC_Service
     {
     public:
-    
         typedef typename Impl::ChannelType    ChannelType;
         typedef typename Impl::ListenerType   ListenerType;
         typedef typename Impl::ChannelType*   ChannelPtr;
@@ -319,12 +361,28 @@ namespace rpc
         static const int Task_AsyncAccept  = 1;
         static const int Task_AsyncWrite   = 2;
         
+        class AcceptHandler
+        {
+            std::function<int (ListenerPtr, ChannelPtr, int)> &m_rhandler;
+        public:
+        
+            AcceptHandler(std::function<int (ListenerPtr, ChannelPtr, int)> & handler)
+                : m_rhandler(handler) 
+            {}
+            
+            int operator()(ListenerPtr p_listener, ChannelPtr p_channel, int ec) 
+            {
+                printf("[TRACE] RPC_Service::AcceptHandler()\n");
+                return m_rhandler(p_listener, p_channel, ec);
+            }
+        };
+        
     private:
         AsyncTaskQueue m_async_taks_queue;
         ProactorType   m_proactor;
         
-        std::function<void (ListenerPtr, int)> m_accept_error_handler;
-         
+        std::function<int (ListenerPtr, ChannelPtr, int)> m_accept_handler;
+        
     private:
         RPC_Service(const RPC_Service&) = delete;
         RPC_Service& operator=(const RPC_Service&) = delete;
@@ -334,13 +392,16 @@ namespace rpc
         ~RPC_Service();
         
         template<class ConnHandler>
-        void        set_conn_handle(ConnHandler handler);
+        void        set_conn_handle(const ConnHandler &handler);
         
         template<class RecvHandler>
-        void        set_recv_handle(RecvHandler handler);
+        void        set_recv_handle(const RecvHandler &handler);
         
         template<class SendHandler>
-        void        set_send_handle(SendHandler handler);
+        void        set_send_handle(const SendHandler &handler);
+        
+        template<class AcceptHandler>
+        void        set_accept_handler(const AcceptHandler &handler) { m_accept_handler = handler; }
         
         bool        open_channel(const char * endpoint, int timeout);
         bool        close_channel(ChannelPtr channel);
@@ -362,7 +423,9 @@ namespace everest {
 namespace rpc {
     
     template<class Impl>
-    RPC_Service<Impl>::RPC_Service() {}
+    RPC_Service<Impl>::RPC_Service() {
+        m_proactor.set_accept_handler(AcceptHandler(m_accept_handler));
+    }
     
     template<class Impl>
     RPC_Service<Impl>::~RPC_Service() {}
@@ -428,7 +491,7 @@ namespace rpc {
         
         // todo: make lock
         m_async_taks_queue.push(task);
-        
+        printf("[TRACE] RPC_Service<Impl>::open_channel, %s, %d\n", endpoint, timeout);
         return true;
     }
     

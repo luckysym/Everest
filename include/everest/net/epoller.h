@@ -22,37 +22,38 @@ namespace net
         
         class Event 
         {
+        private:
+            const epoll_event * m_pevent;
+            
         public:
+            Event(const epoll_event * pevent) : m_pevent(pevent) {}
             
-            int fd() {
-                printf("[ERROR] EPoller::Event::fd, not impl\n");
-                return -1;
-            }
+            int events() const { return m_pevent->events; }
             
-            void * data() { 
-                printf("[ERROR] EPoller::Event::data, not impl\n");
-                return nullptr; 
-            }
+            void * data() { return m_pevent->data.ptr; }
             
-            int events() {
-                printf("[ERROR] EPoller::Event::events, not impl\n");
-                return 0;
-            }
+            int fd () const { m_pevent->data.fd; }
         }; // end of Event 
         
         class Iterator 
         {
+        private:
+            epoll_event * const m_pevents;
+            int                 m_count;
+            int                 m_cursor;
         public:
-            bool has_next() { 
-                printf("[ERROR] EPoller::Iterator::has_next, not impl\n");
-                return false; 
+            Iterator(epoll_event * const pevents, int count)
+                : m_pevents(pevents), m_count(count), m_cursor(0)
+            {
+                printf("[TRACE] EPoller::Iterator(), events count %d\n", count);
             }
+        
+            bool has_next() const { return m_cursor < m_count; }
             
             Event next() { 
-                printf("[ERROR] EPoller::Iterator::next, not impl\n");
-                return Event();
+                return Event(&m_pevents[m_cursor++]);
             }
-                        
+            
         }; // end of Iterator 
         
     private:
@@ -60,6 +61,7 @@ namespace net
         int           m_maxevents;
         int           m_eventcount;
         epoll_event * m_pevents;
+        int           m_count;
         
     private:
         EPoller(const EPoller& ) = delete;
@@ -75,8 +77,7 @@ namespace net
         int  wait(int timeout);
         
         Iterator events() {
-            printf("[ERROR] EPoller::events, not impl\n");
-            return Iterator();
+            return Iterator(m_pevents, m_count);
         }
     }; // end of class EPoller
     
@@ -152,10 +153,13 @@ namespace net
         int ret = ::epoll_wait(m_epfd, m_pevents, m_maxevents, timeout);
         if ( ret < 0 ) {
             printf("[ERROR] EPoller::wait, epoll_wait fail, %d, %s\n", errno, strerror(errno));
+            m_count = 0;
             return false;
         }
+        m_count = ret;
         return ret;
     }
+    
 } // end of namespace net 
 } // end of namespace everest 
 

@@ -49,9 +49,8 @@ namespace net
             p->sa_family = af;
         }
         
-        socklen_t length() const { return m_length; }
-        
-        void length(socklen_t len) { m_length = len; }
+        socklen_t & length() { return m_length; }
+        const socklen_t & length() const { return m_length; }
         
         operator const sockaddr & () const {
             return *((const sockaddr *)m_addrbuf);
