@@ -3,6 +3,7 @@
 
 #pragma once 
 #include <everest/net/sock_addr.h>
+#include <fcntl.h>
 
 namespace everest
 {
@@ -57,6 +58,8 @@ namespace net
         bool listen();
         bool connect(const SocketAddress& addr);
         bool accept(Socket &sock, SocketAddress &addr);
+        
+        bool set_block_mode(bool blocked);
     }; // end of class Socket
 
     Socket::Socket(const Protocol &proto) 
@@ -135,6 +138,26 @@ namespace net
         sock.attach(fd);
         return true;
     }
+    
+    bool Socket::set_block_mode(bool blocked)
+    {
+        int flags = ::fcntl(m_fd, F_GETFL);
+        if ( flags == -1 ) {
+            printf("[ERROR] Socket::set_block_mode, GETFL, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        
+        int non_block = flags & O_NONBLOCK;
+        if ( non_block == 0 && blocked ) return true;   // already blocked
+        if ( non_block && !blocked ) return true;   // already non blocked 
+          
+        flags = ::fcntl(m_fd, F_SETFL, (flags ^= O_NONBLOCK));  // NONBLOCK位异或，0变1,1变0
+        if ( flags == -1 ) {
+            printf("[ERROR] Socket::set_block_mode, SETFL, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        return true;        
+    } // end of Socket::set_block_mode()
     
 } // end of namespace net 
 } // end of namespace everest 
