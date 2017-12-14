@@ -92,12 +92,38 @@ int stop_client()
 }
 
 class ServerAcceptHandler
-{
+{ 
+private:
+    rpc::RPC_Service<> &m_service;
+    
 public:
+    ServerAcceptHandler(rpc::RPC_Service<> &service)
+        : m_service(service) {}
+
     int operator()(rpc::RPC_SocketListener *p_listener, rpc::RPC_SocketChannel * p_channel, int ec)
     {
-        printf("[ERROR] Test ServerAcceptHandler not impl, %p, %p, %d\n", p_listener, p_channel, ec);
-        return rpc::RPC_Constants::Fail;
+        printf("[TRACE] Test ServerAcceptHandler, %p, %p, %d\n", p_listener, p_channel, ec);
+        if ( ec == rpc::RPC_Constants::Ok ) {
+            printf("[TRACE] Test ServerAcceptHandler error, %p, %p, %d\n", p_listener, p_channel, ec);
+            bool isok = m_service.add_channel(p_channel);
+            if ( !isok ) {
+                printf("[ERROR] Test ServerAcceptHandler add channel error, %p, %p, %d\n", p_listener, p_channel, ec);
+                return rpc::RPC_Constants::Fail;
+            } 
+            
+            everest::Mutable_Byte_Buffer * buf = new everest::Mutable_Byte_Buffer(1024);
+            isok = m_service.post_receive(p_channel, rpc::RPC_Message(buf), 5000);
+            if ( isok ) {
+                return rpc::RPC_Constants::Ok;
+            } else {
+                printf("[ERROR] Test ServerAcceptHandler channel async read failed, %p, %p, %d\n", p_listener, p_channel, ec);
+                return rpc::RPC_Constants::Fail;
+            }
+            
+        } else {
+            printf("[ERROR] Test ServerAcceptHandler fail, %p, %p, %d\n", p_listener, p_channel, ec);
+            return rpc::RPC_Constants::Fail;
+        }
     }
 };
 
@@ -107,7 +133,7 @@ void * run_server(void *)
 {
     rpc::RPC_Service<> server;
     
-    server.set_accept_handler(ServerAcceptHandler());
+    server.set_accept_handler(ServerAcceptHandler(server));
     
     rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener(RPC_LOCAL_ENDPOINT);
     if ( !ptrListener ) { throw std::runtime_error("open listener failed"); } 

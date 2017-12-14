@@ -21,8 +21,39 @@
 
 namespace everest
 {
+    template<class T, class Traits>
+    class Basic_Mutable_Buffer
+    {
+    public:
+        typedef T      Value_Type;
+        typedef Traits Traits_Type;
+        
+    private:
+        T *    m_buffer;
+        size_t m_capacity;
+        
+    public: 
+        Basic_Mutable_Buffer(size_t capacity) 
+            : m_capacity(capacity)
+        {
+            m_buffer = (T*) ::malloc(sizeof(T) * capacity);
+            assert(m_buffer);
+            printf("[TRACE] Basic_Mutable_Buffer init\n");
+        }
+        
+        T * ptr() { return m_buffer; }
+        const T * ptr() const { return m_buffer; }
+        
+        size_t capacity() const { return m_capacity; }
+        
+    }; // end of class Basic_Mutable_Buffer
+    
+    class Char_Traits {};
+    
+    typedef Basic_Mutable_Buffer<char, Char_Traits> Mutable_Byte_Buffer;
+    
 namespace rpc 
-{
+{   
     /**
      * 超时队列
      */
@@ -297,8 +328,8 @@ namespace rpc
                     if ( p_sock->type() == RPC_SocketObject::Type_Listener ) {
                         int ret = this->on_acceptable((RPC_SocketListener*)p_sock);
                         if ( ret == RPC_Constants::Ok ) {
-                            // TODO 接下去怎么做
-                            printf("[ERROR] RPC_Proactor::process_events, listener get Finish\n" );
+                            // 接受新连接完成
+                            printf("[INFO] RPC_Proactor::process_events, listener get Finish\n");
                         } else if ( ret == RPC_Constants::Fail ) { 
                             printf("[ERROR] RPC_Proactor::process_events, listener get Fail\n" );
                         } else {
@@ -326,7 +357,23 @@ namespace rpc
         
     }; // class RPC_Proactor
     
-    class RPC_Message {};
+    class RPC_Message 
+    {
+    private:
+        Mutable_Byte_Buffer *m_buffer;
+        
+    public:
+        RPC_Message() : m_buffer(nullptr) {}
+    
+        RPC_Message(Mutable_Byte_Buffer * p_buf) 
+            : m_buffer(p_buf) 
+        {}
+        
+        ~RPC_Message() { m_buffer = nullptr; } 
+        
+        Mutable_Byte_Buffer * buffer() { return m_buffer; }
+        const Mutable_Byte_Buffer * buffer() const { return m_buffer; }
+    }; // end of class RPC_Message 
     
     class RPC_TcpSocketService_Impl
     {
@@ -347,6 +394,11 @@ namespace rpc
         typedef typename Impl::ListenerType*  ListenerPtr;
         typedef typename Impl::MessageType    MessageType;
         typedef typename Impl::ProactorType   ProactorType;
+
+        static const int Task_Async_Accept  = 1;
+        static const int Task_Async_Write   = 2;
+        static const int Task_Async_Read    = 3;
+        static const int Task_Async_Add     = 4;   // add channel or listener to proactor service
         
         struct AsyncTask
         {
@@ -355,11 +407,27 @@ namespace rpc
             ListenerPtr  p_listener;
             MessageType  message;
             int64_t      expire_time;
+            
+            AsyncTask() 
+                : task_type(0), p_channel(nullptr), p_listener(nullptr), expire_time(RPC_Constants::Max_Expire_Time)
+            {}
+            
+            AsyncTask(int type, ChannelPtr ch) 
+                : task_type( type ) , p_channel(ch), p_listener(nullptr), expire_time(RPC_Constants::Max_Expire_Time)
+            {}
+                
+            AsyncTask(int type, ChannelPtr ch, const MessageType &msg, int64_t exp)
+                : task_type(type), p_channel(ch), p_listener(nullptr), message(msg), expire_time(exp)
+            {}
+
+            AsyncTask(int type, ListenerPtr listener, const MessageType &msg, int64_t exp)
+                : task_type(type), p_channel(nullptr), p_listener(listener), message(msg), expire_time(exp)
+            {}
+
         };  // end struct AsyncTask 
         typedef std::queue<AsyncTask>         AsyncTaskQueue;
         
-        static const int Task_AsyncAccept  = 1;
-        static const int Task_AsyncWrite   = 2;
+
         
         class AcceptHandler
         {
@@ -378,7 +446,7 @@ namespace rpc
         };
         
     private:
-        AsyncTaskQueue m_async_taks_queue;
+        AsyncTaskQueue m_async_task_queue;
         ProactorType   m_proactor;
         
         std::function<int (ListenerPtr, ChannelPtr, int)> m_accept_handler;
@@ -409,8 +477,10 @@ namespace rpc
         ListenerPtr open_listener(const char * endpoint);
         bool        close_listener(ListenerPtr listener);
         
+        bool        add_channel(ChannelPtr channel);
+        
         bool        post_accept(ListenerPtr listener, int timeout);
-        bool        post_receive(ChannelPtr channel, MessageType & rMessage, int timeout);
+        bool        post_receive(ChannelPtr channel, MessageType cMessage, int timeout);
         bool        post_send(ChannelPtr channel, MessageType & rMessage, int timeout);
         
         int         run();
@@ -460,13 +530,13 @@ namespace rpc {
         int64_t now = DateTime::get_timestamp();
         AsyncTask task;
         
-        task.task_type   = Task_AsyncAccept;
+        task.task_type   = Task_Async_Accept;
         task.p_listener  = listener;
         if ( timeout < 0 ) task.expire_time = RPC_Constants::Max_Expire_Time;
         else task.expire_time = now + timeout * 1000;
         
         // todo: make lock
-        m_async_taks_queue.push(task);
+        m_async_task_queue.push(task);
         
         return true;
     }
@@ -484,14 +554,38 @@ namespace rpc {
         }
 
         AsyncTask task;
-        task.task_type  = Task_AsyncWrite;
+        task.task_type  = Task_Async_Write;
         task.p_channel  = p_channel;
         if ( timeout < 0 ) task.expire_time = RPC_Constants::Max_Expire_Time;
         else task.expire_time = now + timeout * 1000;
         
         // todo: make lock
-        m_async_taks_queue.push(task);
+        m_async_task_queue.push(task);
         printf("[TRACE] RPC_Service<Impl>::open_channel, %s, %d\n", endpoint, timeout);
+        return true;
+    }
+    
+    template<class Impl>
+    bool RPC_Service<Impl>::add_channel(ChannelPtr channel) 
+    {
+        AsyncTask task(Task_Async_Add, channel);
+        m_async_task_queue.push(task);
+        printf("[TRACE] RPC_Service<Impl>::add_channel, %d\n", channel->get_socket().handle());
+        return true;
+    }
+    
+    template<class Impl>
+    bool RPC_Service<Impl>::post_receive(ChannelPtr channel, MessageType msg, int timeout) 
+    {
+        int64_t exp = RPC_Constants::Max_Expire_Time;
+        if ( timeout > 0 ) {
+            int64_t now = DateTime::get_timestamp();
+            exp = now + timeout * 1000;
+        }
+        
+        AsyncTask task(Task_Async_Read, channel, msg, exp);
+        m_async_task_queue.push(task);
+        printf("[TRACE] RPC_Service<Impl>::post_receive, %d\n", channel->get_socket().handle());
         return true;
     }
     
@@ -499,16 +593,16 @@ namespace rpc {
     int RPC_Service<Impl>::run()
     {
         bool isok;
-        while ( !m_async_taks_queue.empty() ) {
-            AsyncTask & task = m_async_taks_queue.front();
+        while ( !m_async_task_queue.empty() ) {
+            AsyncTask & task = m_async_task_queue.front();
             
-            if ( task.task_type == Task_AsyncAccept) {
+            if ( task.task_type == Task_Async_Accept) {
                 printf("[TRACE] RPC_Service::run, new accept task\n");
                 m_proactor.add_read(task.p_listener, task.expire_time);
             } else {
                 printf("[ERROR] RPC_Service::run, unknown task type %d\n", task.task_type);
             }
-            m_async_taks_queue.pop();
+            m_async_task_queue.pop();
         }
         
         int ret = m_proactor.run();
@@ -517,6 +611,8 @@ namespace rpc {
         }
         return ret;
     }
+    
+
     
 } // end of namespace rpc 
 } // end of namespace everest

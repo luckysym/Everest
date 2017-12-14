@@ -143,7 +143,7 @@ namespace rpc
             printf("[ERROR] RPC_SocketListener::accept failed\n");
             return nullptr;
         }
-        printf("[ERROR] RPC_SocketListener::accept, new channel accepted, fd %d\n");
+        printf("[TRACE] RPC_SocketListener::accept, new channel accepted, fd %d\n", newsock.handle());
         return (RPC_SocketChannel *) new RPC_SocketChannel(newsock, addr);
     }
     
