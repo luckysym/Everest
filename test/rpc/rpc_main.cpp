@@ -104,7 +104,7 @@ public:
     {
         printf("[TRACE] Test ServerAcceptHandler, %p, %p, %d\n", p_listener, p_channel, ec);
         if ( ec == rpc::RPC_Constants::Ok ) {
-            printf("[TRACE] Test ServerAcceptHandler error, %p, %p, %d\n", p_listener, p_channel, ec);
+            printf("[TRACE] Test ServerAcceptHandler ok, %p, %p, %d\n", p_listener, p_channel, ec);
             bool isok = m_service.add_channel(p_channel);
             if ( !isok ) {
                 printf("[ERROR] Test ServerAcceptHandler add channel error, %p, %p, %d\n", p_listener, p_channel, ec);
@@ -127,8 +127,6 @@ public:
     }
 };
 
-
-
 void * run_server(void *)
 {
     rpc::RPC_Service<> server;
@@ -141,7 +139,7 @@ void * run_server(void *)
     bool isok = server.post_accept(ptrListener, 5000);
     if ( !isok ) { throw std::runtime_error("post accept failed");}
     
-    int result = server.run();
+    int result = server.run_once();
     if ( result < 0 ) { throw std::runtime_error("server run failed");}
     
     printf("Server Exit, result %d\n", result);
@@ -153,7 +151,7 @@ void * run_client(void *)
     rpc::RPC_Service<> client;
     bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
     
-    int ret = client.run();
+    int ret = client.run_once();
     printf("Client Exit\n");
     return nullptr;
 }

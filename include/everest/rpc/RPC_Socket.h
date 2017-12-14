@@ -22,6 +22,11 @@ namespace rpc
         static const int Accept = 4;
         
         static const int64_t Max_Expire_Time = INT64_MAX;
+        
+        static const int State_Closed     = 0;
+        static const int State_Init       = 1;
+        static const int State_Connecting = 2;
+        static const int State_Connected  = 3;
     }; // end of RPC_Constants
     
     class RPC_SocketChannel;
@@ -40,7 +45,10 @@ namespace rpc
 
     public:
         RPC_SocketObject(const net::Protocol& proto, int type) 
-            : m_proto(proto), m_socket(proto), m_type(type) {}
+            : m_proto(proto), m_socket(proto), m_type(type) 
+        {
+            m_socket.set_block_mode(false); // 非阻塞模式
+        }
         
         RPC_SocketObject(const net::Protocol& proto, int type, 
                          net::Socket &sock, net::SocketAddress &addr) 
@@ -60,15 +68,22 @@ namespace rpc
     
     class RPC_SocketChannel : public RPC_SocketObject 
     {
+    protected:
+        int   m_state;    // socket channel状态
     public: 
         RPC_SocketChannel()
             : RPC_SocketObject(net::Protocol::tcp4(), Type_Channel)
+            , m_state(RPC_Constants::State_Init)
         {}
         
         RPC_SocketChannel(net::Socket &sock, net::SocketAddress &addr)
             : RPC_SocketObject(net::Protocol::tcp4(), Type_Channel, sock, addr)
+            , m_state(RPC_Constants::State_Init)
         {}
         
+        int  state() const { return m_state; }
+        void state(int s) { m_state = s; }
+
         bool open(const char * endpoint);
     };
     
@@ -129,6 +144,7 @@ namespace rpc
             printf("[ERROR] RPC_TcpSocketChannel::open, connect failed, %s\n", endpoint);
             return false;
         }
+        this->m_state = RPC_Constants::State_Connecting;
         return true;
     }
     
