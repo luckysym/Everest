@@ -146,9 +146,24 @@ void * run_server(void *)
     return nullptr;
 }
 
+class ClientConnectHandler
+{
+private:
+    rpc::RPC_Service<> &m_service;
+    
+public:
+    ClientConnectHandler(rpc::RPC_Service<> &service)
+        : m_service(service) {}
+    
+    int operator()(rpc::RPC_SocketChannel *p_channel, int ec) {
+        printf("[TRACE] Test ClientConnectHandler %d\n", ec);
+    }
+};
+
 void * run_client(void *)
 {
     rpc::RPC_Service<> client;
+    client.set_conn_handler(ClientConnectHandler(client));
     bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
     
     int ret = client.run_once();

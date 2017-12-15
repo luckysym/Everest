@@ -166,11 +166,15 @@ namespace rpc
         Poller           m_poller;
         TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
         std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
+        std::function<int (RPC_SocketChannel*, int ec)> m_connect_handler;  // channel连接成功处理
         
     public:
         
         template<class Handler>
         void set_accept_handler(const Handler &handler) { m_accept_handler = handler; }
+        
+        template<class Handler>
+        void set_connect_handler(const Handler &handler) { m_connect_handler = handler; }
     
         bool reg(RPC_SocketObject *sockobj) 
         {
@@ -221,8 +225,8 @@ namespace rpc
         }
         
     private:
-        int on_acceptable(RPC_SocketListener * plistener) {
-            
+        int on_acceptable(RPC_SocketListener * plistener) 
+        {
             RPC_SocketChannel * p_channel = plistener->accept();
             if ( p_channel == nullptr ) {
                 this->m_accept_handler(plistener, p_channel, RPC_Constants::Fail);
@@ -248,14 +252,15 @@ namespace rpc
             printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
             return RPC_Constants::Ok;
         }
+        
         int on_writable(RPC_SocketChannel *pch) {
             printf("[ERROR] RPC_Proactor::on_writable, poller wait error\n");
             return RPC_Constants::Ok;
         }
         
         int on_connected(RPC_SocketChannel *p_ch) {
-            printf("[ERROR] RPC_Proactor::on_connected, poller wait error\n");
-            return RPC_Constants::Ok;
+            printf("[TRACE] RPC_Proactor::on_connected\n");
+            return this->m_connect_handler(p_ch, RPC_Constants::Ok);
         }
         
         void clear_timeout_task() {
@@ -305,7 +310,7 @@ namespace rpc
                             int ret = this->on_writable(p_channel);
                             if ( ret == RPC_Constants::Ok ) {
                                 // TODO 接下去怎么做
-                                printf("[ERROR] RPC_Proactor::process_events, channel write finish\n" );
+                                printf("[WARN] RPC_Proactor::process_events, channel write finish\n" );
                             } else {
                                 throw std::runtime_error("RPC_Proactor::run, Channel on writable returns unknown");
                             }
@@ -313,7 +318,7 @@ namespace rpc
                             int ret = this->on_connected(p_channel);
                             if ( ret == RPC_Constants::Ok ) {
                                 // TODO 接下去怎么做
-                                printf("[ERROR] RPC_Proactor::process_events, channel connected\n" );
+                                printf("[WARN] RPC_Proactor::process_events, channel connected\n" );
                             } else {
                                 throw std::runtime_error("RPC_Proactor::run, Channel on connected returns unknwon");
                             }

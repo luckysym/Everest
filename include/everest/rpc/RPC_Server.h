@@ -88,8 +88,6 @@ namespace rpc
         };  // end struct AsyncTask 
         typedef std::queue<AsyncTask>         AsyncTaskQueue;
         
-
-        
         class AcceptHandler
         {
             std::function<int (ListenerPtr, ChannelPtr, int)> &m_rhandler;
@@ -106,11 +104,28 @@ namespace rpc
             }
         };
         
+        // channel connected handler 
+        class ConnectHandler
+        {
+            std::function<int (ChannelPtr, int)> &m_rhandler;
+        public:
+            ConnectHandler(std::function<int (ChannelPtr, int)> &handler)
+                : m_rhandler(handler) {}
+                
+            int operator()(ChannelPtr p_channel, int ec) {
+                printf("[TRACE] RPC_Service::ConnectHandler()\n");
+                return this->m_rhandler(p_channel, ec);
+            }
+        };
+        
+        
+        
     private:
         AsyncTaskQueue m_async_task_queue;
         ProactorType   m_proactor;
         
         std::function<int (ListenerPtr, ChannelPtr, int)> m_accept_handler;
+        std::function<int (ChannelPtr, int)> m_connect_handler;
         
     private:
         RPC_Service(const RPC_Service&) = delete;
@@ -121,13 +136,13 @@ namespace rpc
         ~RPC_Service();
         
         template<class ConnHandler>
-        void        set_conn_handle(const ConnHandler &handler);
+        void        set_conn_handler(const ConnHandler &handler) { m_connect_handler = handler; }
         
         template<class RecvHandler>
-        void        set_recv_handle(const RecvHandler &handler);
+        void        set_recv_handler(const RecvHandler &handler);
         
         template<class SendHandler>
-        void        set_send_handle(const SendHandler &handler);
+        void        set_send_handler(const SendHandler &handler);
         
         template<class AcceptHandler>
         void        set_accept_handler(const AcceptHandler &handler) { m_accept_handler = handler; }
@@ -156,6 +171,7 @@ namespace rpc {
     template<class Impl>
     RPC_Service<Impl>::RPC_Service() {
         m_proactor.set_accept_handler(AcceptHandler(m_accept_handler));
+        m_proactor.set_connect_handler(ConnectHandler(m_connect_handler));
     }
     
     template<class Impl>
