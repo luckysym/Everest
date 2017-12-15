@@ -17,21 +17,48 @@ namespace everest
         
     private:
         T *    m_buffer;
-        size_t m_capacity;
+        size_t m_capacity; // 缓存总长
+        size_t m_size;     // 有效数据长度
         
     public: 
-        Basic_Mutable_Buffer(size_t capacity) 
-            : m_capacity(capacity)
+        Basic_Mutable_Buffer(T *data, size_t capacity) 
+            : m_buffer(data), m_capacity(capacity)
         {
-            m_buffer = (T*) ::malloc(sizeof(T) * capacity);
-            assert(m_buffer);
             printf("[TRACE] Basic_Mutable_Buffer init\n");
         }
         
-        T * ptr() { return m_buffer; }
-        const T * ptr() const { return m_buffer; }
-        
         size_t capacity() const { return m_capacity; }
+        
+        size_t size() const { return m_size; }
+        
+        bool resize(size_t newsize) {
+            if ( newsize <= m_capacity ) {
+                m_size = newsize;
+                return true; 
+            } else return false;
+        }
+        
+        template<class D = T>
+        D * ptr() { return m_buffer; }
+        
+        template<class D = T>
+        const D * ptr() const { return m_buffer; }
+        
+        template<class D = T>
+        D * ptr(size_t offset) { return (D *)(m_buffer + offset); }
+        
+        template<class D = T>
+        const D * ptr(size_t offset) const { return (const D *)(m_buffer + offset); }
+
+        template<class D>
+        D & data(size_t offset) { return *(D *)(m_buffer + offset); }
+        
+        template<class D>
+        const D & data(size_t offset) const { return *(const D *)(m_buffer + offset); }
+        
+        T & operator[](size_t offset) { return m_buffer[offset]; }
+        
+        const T & operator[](size_t offset) const { return m_buffer[offset]; }
         
     }; // end of class Basic_Mutable_Buffer
     

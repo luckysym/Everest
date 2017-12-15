@@ -111,7 +111,7 @@ public:
                 return rpc::RPC_Constants::Fail;
             } 
             
-            everest::Mutable_Byte_Buffer * buf = new everest::Mutable_Byte_Buffer(1024);
+            everest::Mutable_Byte_Buffer buf(new char[1024], 1024);
             isok = m_service.post_receive(p_channel, rpc::RPC_Message(buf), 5000);
             if ( isok ) {
                 return rpc::RPC_Constants::Ok;
@@ -157,6 +157,22 @@ public:
     
     int operator()(rpc::RPC_SocketChannel *p_channel, int ec) {
         printf("[TRACE] Test ClientConnectHandler %d\n", ec);
+    
+        everest::Mutable_Byte_Buffer buf(new char[32], 32);
+        everest::Mutable_Byte_Buffer buf2(new char[128], 128);
+        int len = snprintf(buf2.ptr(), buf2.capacity(), "hello request");
+        buf2.resize(len);
+        rpc::RPC_Message msg(buf);
+        msg.init_header();
+        msg.add_buffer(buf2);
+        msg.update_header();
+        
+        bool isok = m_service.post_send(p_channel, msg, 2000);
+        if ( !isok ) {
+            printf("[TRACE] Test ClientConnectHandler post send fail\n");
+            return rpc::RPC_Constants::Fail;
+        }
+        return rpc::RPC_Constants::Ok;
     }
 };
 
@@ -165,7 +181,7 @@ void * run_client(void *)
     rpc::RPC_Service<> client;
     client.set_conn_handler(ClientConnectHandler(client));
     bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
-    
+        
     int ret = client.run_once();
     printf("Client Exit\n");
     return nullptr;
