@@ -112,7 +112,9 @@ public:
             } 
             
             everest::Mutable_Byte_Buffer buf(new char[1024], 1024);
-            isok = m_service.post_receive(p_channel, rpc::RPC_Message(buf), 5000);
+            everest::Mutable_Buffer_Sequence * seq = new everest::Mutable_Buffer_Sequence();
+            seq->push_back(buf);
+            isok = m_service.post_receive(p_channel, rpc::RPC_Message(*seq), 5000);
             if ( isok ) {
                 return rpc::RPC_Constants::Ok;
             } else {
@@ -161,10 +163,12 @@ public:
         everest::Mutable_Byte_Buffer buf(new char[32], 32);
         everest::Mutable_Byte_Buffer buf2(new char[128], 128);
         int len = snprintf(buf2.ptr(), buf2.capacity(), "hello request");
-        buf2.resize(len);
-        rpc::RPC_Message msg(buf);
+        buf2.size(len);
+        everest::Mutable_Buffer_Sequence * bufseq = new everest::Mutable_Buffer_Sequence();
+        bufseq->push_back(buf);
+        bufseq->push_back(buf2);
+        rpc::RPC_Message msg(*bufseq);
         msg.init_header();
-        msg.add_buffer(buf2);
         msg.update_header();
         
         bool isok = m_service.post_send(p_channel, msg, 2000);
@@ -181,8 +185,12 @@ void * run_client(void *)
     rpc::RPC_Service<> client;
     client.set_conn_handler(ClientConnectHandler(client));
     bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
-        
-    int ret = client.run_once();
+    
+    for(int i = 0; i < 2; ++i) {
+        int ret = client.run_once();
+        printf("Client Run Once %d\n", ret);
+        if ( ret < 0 ) break;
+    }
     printf("Client Exit\n");
     return nullptr;
 }

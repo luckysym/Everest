@@ -10,7 +10,86 @@
 namespace everest 
 {
 namespace rpc 
-{
+{   
+    class RPC_Message 
+    {
+    public:
+        static const size_t Header_Length = 24;
+        
+        // Message Type
+        static const char   Type_Request  = 0;
+        
+        // Message field index
+        static const size_t Idx_Length = 8;
+        
+        // byte endian
+        static const char   Little_Endian = 0;
+        static const char   Big_Endian = 1; 
+        
+    public:
+        typedef Mutable_Buffer_Sequence Buffer_Sequence;
+        
+    private:
+        Buffer_Sequence *m_buffer_seq;
+        
+    public:
+        RPC_Message () : m_buffer_seq(nullptr) {}
+  
+        RPC_Message(Mutable_Buffer_Sequence &buffers) 
+        {
+            m_buffer_seq = &buffers;
+        }
+        
+        ~RPC_Message() {}
+        
+        bool init_header();
+        bool update_header();
+        bool add_buffer(Mutable_Byte_Buffer & buf);    
+        
+        Buffer_Sequence &buffers() { return *m_buffer_seq; }
+    }; // end of class RPC_Message 
+    
+    bool RPC_Message::update_header()
+    {
+        uint32_t total_len = 0;
+        Buffer_Sequence::Iterator it = m_buffer_seq->begin();
+        for(; it != m_buffer_seq->end(); ++it) {
+            total_len += it->size();
+        }
+        m_buffer_seq->front().data<uint32_t>(Idx_Length) = total_len;;
+    }
+    
+    bool RPC_Message::add_buffer(Mutable_Byte_Buffer & buf) {
+        m_buffer_seq->push_back(buf);
+        return true;
+    }
+    
+    bool RPC_Message::init_header() {
+        Buffer_Sequence::Iterator it = m_buffer_seq->begin();
+        if ( it == m_buffer_seq->end() ) {
+            printf("[ERROR] RPC_Message::init_header, no buffer\n");
+            return false;
+        }
+        Mutable_Byte_Buffer &buf = *it;
+        bool isok = buf.size(Header_Length);
+        if ( !isok ) {
+            printf("[ERROR] RPC_Message::init_header, no enough space\n");
+            return false;
+        }
+        
+        // magic
+        buf[0] = 'G'; buf[1] = 'I'; buf[2] = 'O'; buf[3] = 'P';
+        // version
+        buf[4] = '0'; buf[5] = '0';  
+        // flags/byte order and message type 
+        buf[6] = Little_Endian; buf[7] = Type_Request;
+        // length
+        buf.data<uint32_t>(8) = 0;
+        
+        return true;
+    } // end of RPC_Message::init_header
+    
+    
     /**
      * 超时队列
      */
@@ -25,7 +104,8 @@ namespace rpc
             TaskOwner * m_owner_ref;
             int         m_type;
             int64_t     m_expire_time;
-        
+            RPC_Message m_msg;
+            
         public:
             Task(TaskOwner *owner, int type, int64_t exp) 
                 : m_owner_ref(owner), m_type(type), m_expire_time(exp) {}
@@ -35,6 +115,8 @@ namespace rpc
             int type() const { return m_type; }
             
             TaskOwner * owner() { return m_owner_ref; }
+            
+            RPC_Message & message() { return m_msg; }
         };
         
         class TaskOwner 
@@ -66,6 +148,24 @@ namespace rpc
                 else {
                     printf("[WARN] RPC_TaskTimeoutQueue::TaskOwner::get_front_task, no task\n");
                     return nullptr;
+                }
+            }
+            
+            void pop_front_task(int type)
+            {
+                std::queue<Task> * queue = nullptr;
+                if ( type == RPC_Constants::Read ) queue = &m_rd_queue;
+                else if ( type == RPC_Constants::Write) queue = &m_wr_queue;
+                else {
+                    printf("[ERROR] RPC_TaskTimeoutQueue::TaskOwner::pop_front_task, wrong type\n");
+                }
+                
+                printf("[TRACE] RPC_TaskTimeoutQueue::TaskOwner::pop_front_task, type %d, empty %s\n", 
+                    type, queue->empty()?"true":"false");
+                
+                if ( !queue->empty() ) queue->pop();
+                else {
+                    printf("[ERROR] RPC_TaskTimeoutQueue::TaskOwner::pop_front_task, no task\n");
                 }
             }
             
@@ -159,16 +259,22 @@ namespace rpc
         }
     }; // end of class RPC_TimeoutQueue
     
-    template<class Poller = net::EPoller, class TaskTimeoutQueue = RPC_TaskTimeoutQueue>
+    template<class Poller = net::EPoller>
     class RPC_Proactor 
     {
     private:
-        Poller           m_poller;
-        TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
+        Poller               m_poller;
+        RPC_TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
         std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
         std::function<int (RPC_SocketChannel*, int ec)> m_connect_handler;  // channel连接成功处理
         
+        std::vector<struct iovec> m_send_iovec;
+        
     public:
+        RPC_Proactor() {
+            m_send_iovec.reserve(16);
+        }
+        
         
         template<class Handler>
         void set_accept_handler(const Handler &handler) { m_accept_handler = handler; }
@@ -179,7 +285,7 @@ namespace rpc
         bool reg(RPC_SocketObject *sockobj) 
         {
             // 任务超时队列中注册socket对象
-            typename TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.add_owner(sockobj);
+            RPC_TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.add_owner(sockobj);
             assert(p_owner);
             
             bool isok = m_poller.add(sockobj->get_socket().handle(), 0, p_owner);
@@ -203,7 +309,7 @@ namespace rpc
             
             bool  need_clear_timeout = false;   // 是否在wait后需要清理超时任务
             
-            typename TaskTimeoutQueue::Task * p_task = m_task_timeout_queue.get_front_timeout();
+            RPC_TaskTimeoutQueue::Task * p_task = m_task_timeout_queue.get_front_timeout();
             int timeout = (int)((p_task->expire_time() - now) / 1000);
             if ( timeout < 0 ) {
                 need_clear_timeout = true;
@@ -253,10 +359,7 @@ namespace rpc
             return RPC_Constants::Ok;
         }
         
-        int on_writable(RPC_SocketChannel *pch) {
-            printf("[ERROR] RPC_Proactor::on_writable, poller wait error\n");
-            return RPC_Constants::Ok;
-        }
+        int on_writable(RPC_SocketChannel *pch, RPC_TaskTimeoutQueue::Task *p_task);
         
         int on_connected(RPC_SocketChannel *p_ch) {
             printf("[TRACE] RPC_Proactor::on_connected\n");
@@ -272,7 +375,7 @@ namespace rpc
             typename Poller::Iterator iter = m_poller.events();
             while ( iter.has_next() ) {
                 typename Poller::Event e = iter.next();
-                typename TaskTimeoutQueue::TaskOwner * p_owner = (typename TaskTimeoutQueue::TaskOwner*)e.data();
+                RPC_TaskTimeoutQueue::TaskOwner * p_owner = (RPC_TaskTimeoutQueue::TaskOwner*)e.data();
                 RPC_SocketObject *p_sock = p_owner->get_socket();
                     
                 if ( e.events() & Poller::Event_Read ) {
@@ -304,42 +407,94 @@ namespace rpc
                 if ( e.events() & Poller::Event_Write ) {
                     printf("[TRACE] RPC_Proactor::process_events, get write event\n");
                     if ( p_sock->type() == RPC_SocketObject::Type_Channel ) {
-                        printf("[TRACE] RPC_Proactor::process_events, get write event\n");
                         RPC_SocketChannel *p_channel = (RPC_SocketChannel*)p_sock;
-                        if ( p_channel->state() == RPC_Constants::State_Connected ) {
-                            int ret = this->on_writable(p_channel);
-                            if ( ret == RPC_Constants::Ok ) {
-                                // TODO 接下去怎么做
-                                printf("[WARN] RPC_Proactor::process_events, channel write finish\n" );
-                            } else {
-                                throw std::runtime_error("RPC_Proactor::run, Channel on writable returns unknown");
+                        auto p_task = p_owner->get_front_task(RPC_Constants::Write);  // 获取队列中一个写任务
+                        if ( p_task ) { // 任务存在
+                            if ( p_channel->state() == RPC_Constants::State_Connected ) {
+                                int ret = this->on_writable(p_channel, p_task);
+                                if ( ret == RPC_Constants::Ok ) {
+                                    // TODO 接下去怎么做
+                                    printf("[WARN] RPC_Proactor::process_events, channel write finish\n" );
+                                    p_owner->pop_front_task(RPC_Constants::Write); // 任务完成，删除
+                                } else {
+                                    throw std::runtime_error("RPC_Proactor::run, Channel on writable returns unknown");
+                                }
+                            } else if ( p_channel->state() == RPC_Constants::State_Connecting) {
+                                p_channel->state(RPC_Constants::State_Connected); // 修改状态为已连接
+                                int ret = this->on_connected(p_channel);
+                                if ( ret == RPC_Constants::Ok ) {
+                                    // TODO 接下去怎么做
+                                    p_owner->pop_front_task(RPC_Constants::Write); // 任务完成，删除
+                                    printf("[WARN] RPC_Proactor::process_events, channel connected\n" );
+                                } else {
+                                    throw std::runtime_error("RPC_Proactor::run, Channel on connected returns unknwon");
+                                }
                             }
-                        } else if ( p_channel->state() == RPC_Constants::State_Connecting) {
-                            int ret = this->on_connected(p_channel);
-                            if ( ret == RPC_Constants::Ok ) {
-                                // TODO 接下去怎么做
-                                printf("[WARN] RPC_Proactor::process_events, channel connected\n" );
-                            } else {
-                                throw std::runtime_error("RPC_Proactor::run, Channel on connected returns unknwon");
-                            }
+                        } else {
+                            throw std::runtime_error("RPC_Proactor::run, no write task");
                         }
                     } else {
                         printf("[ERROR] RPC_Proactor::process_events, unknown write socket object\n");
                         throw std::runtime_error("RPC_Proactor::process_events, unknown write socket object");
                     }
                 }
-
             } // end while
             printf("[TRACE] RPC_Proactor::process_events\n" );
         } // end of process_events
         
     }; // class RPC_Proactor
     
-    template<class Poller, class TaskTimeoutQueue>
+    template<class Poller>
     inline 
-    bool RPC_Proactor<Poller, TaskTimeoutQueue>::add_read(RPC_SocketObject *sockobj, int64_t expire)
+    int RPC_Proactor<Poller>::on_writable(
+        RPC_SocketChannel *pch, RPC_TaskTimeoutQueue::Task *p_task) 
     {
-        typename TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
+        printf("[TRACE] RPC_Proactor<Poller>::on_writable\n");
+        RPC_Message &r_msg = p_task->message();
+        RPC_Message::Buffer_Sequence &r_bufseq = r_msg.buffers();
+        Mutable_Buffer_Sequence::Iterator it = r_bufseq.latest();
+        if ( it == r_bufseq.end() ) {
+            throw std::runtime_error("RPC_Proactor<Poller>::on_writable, no buffer");
+        }
+        size_t total_size = 0;
+        m_send_iovec.resize(0);
+        printf("[TRACE] RPC_Proactor<Poller>::on_writable, size %ld, cap %ld\n",
+            m_send_iovec.size(), m_send_iovec.capacity());
+        for(; it != r_bufseq.end(); ++it ) {
+            size_t s = it->size() - it->position();
+            if ( s == 0 ) continue;
+            
+            total_size += s;
+            if ( m_send_iovec.capacity() == m_send_iovec.size() ) {
+                printf("[TRACE] RPC_Proactor<Poller>::on_writable, reserve: size %ld, cap %ld\n",
+                    m_send_iovec.size(), m_send_iovec.capacity());
+                m_send_iovec.reserve(m_send_iovec.capacity() * 2);
+            }
+            m_send_iovec.push_back(iovec{it->ptr<>(it->position()), s});
+        } // end for
+        
+        ssize_t ret = pch->get_socket().send(m_send_iovec);
+        if ( ret > 0 ) {
+            printf("[ERROR] RPC_Proactor::on_writable, % bytes sent\n", ret);
+        } else if ( ret == 0 ) {
+            printf("[ERROR] RPC_Proactor::on_writable, no byte sent\n");
+        } else { // ret < 0
+            if ( errno == EAGAIN ) {
+                printf("[ERROR] RPC_Proactor::on_writable, EAGAIN\n");
+            } else {
+                printf("[ERROR] RPC_Proactor::on_writable,%d, %s %ld\n", errno, strerror(errno));
+            } 
+        }
+        
+        printf("[TRACE] RPC_Proactor::on_writable, total size %ld\n", total_size);
+        return RPC_Constants::Ok;
+    }
+    
+    template<class Poller>
+    inline 
+    bool RPC_Proactor<Poller>::add_read(RPC_SocketObject *sockobj, int64_t expire)
+    {
+        RPC_TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
         assert(p_owner);
         
         bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Read, expire); 
@@ -362,11 +517,11 @@ namespace rpc
         return isok;
     }
     
-    template<class Poller, class TaskTimeoutQueue>
+    template<class Poller>
     inline 
-    bool RPC_Proactor<Poller, TaskTimeoutQueue>::add_write(RPC_SocketObject *sockobj, int64_t expire)
+    bool RPC_Proactor<Poller>::add_write(RPC_SocketObject *sockobj, int64_t expire)
     {
-        typename TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
+        RPC_TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
         assert(p_owner);
             
         bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Write, expire); 

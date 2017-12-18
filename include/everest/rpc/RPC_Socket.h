@@ -92,7 +92,9 @@ namespace rpc
     public:
         RPC_SocketListener() 
             : RPC_SocketObject(net::Protocol::tcp4(), Type_Listener) 
-        {}
+        {
+            m_socket.set_reuse_addr(true);  // 地址可重复使用
+        }
         
         bool                open(const char * endpoint);
         RPC_SocketChannel * accept();

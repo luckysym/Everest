@@ -4,6 +4,7 @@
 #pragma once 
 #include <everest/net/sock_addr.h>
 #include <fcntl.h>
+#include <vector>
 
 namespace everest
 {
@@ -59,7 +60,10 @@ namespace net
         bool connect(const SocketAddress& addr);
         bool accept(Socket &sock, SocketAddress &addr);
         
+        ssize_t send(std::vector<struct iovec> &buffers);
+        
         bool set_block_mode(bool blocked);
+        bool set_reuse_addr(bool reuse);
     }; // end of class Socket
 
     Socket::Socket(const Protocol &proto) 
@@ -158,6 +162,33 @@ namespace net
         }
         return true;        
     } // end of Socket::set_block_mode()
+    
+    bool Socket::set_reuse_addr(bool reuse)
+    {
+        int val = reuse;
+        int ret = ::setsockopt(m_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(int));
+        if ( ret < 0 ) {
+            printf("[ERROR] Socket::set_resue_addr, %d, %s\n", errno, strerror(errno));
+            return false;
+        }
+        return true;
+    }
+    
+    ssize_t Socket::send(std::vector<struct iovec> &buffers)
+    {
+        struct msghdr msg;
+        msg.msg_name = nullptr;
+        msg.msg_namelen = 0;
+        msg.msg_iov = &buffers[0];
+        msg.msg_iovlen = buffers.size();
+        msg.msg_control = nullptr;
+        msg.msg_controllen = 0;
+        msg.msg_flags = 0;
+    
+        ssize_t ret = ::sendmsg(m_fd, &msg, 0);
+        printf("[TRACE] Socket::send, iovec\n");
+        return ret;
+    }
     
 } // end of namespace net 
 } // end of namespace everest 
