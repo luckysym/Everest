@@ -100,10 +100,10 @@ namespace everest
         }
     
         bool push_back(const Buffer &buf) {    // 追加一个缓存
-            //m_buffers.push_back(buf);
-            //if ( m_it_latest == m_buffers.end() ) {
-            //    m_it_latest = (--m_buffers.end());
-            //}
+            m_buffers.push_back(buf);
+            if ( m_it_latest == m_buffers.end() ) {
+                m_it_latest = (--m_buffers.end());
+            }
             return true;
         }
         
@@ -116,11 +116,11 @@ namespace everest
             return true;
         }
         
-        Iterator begin() {                // 获取首个缓存迭代器
+        Iterator begin() {               // 获取首个缓存迭代器
             return m_buffers.begin();
         }
         
-        Iterator end() {                   // 获取结束缓存迭代器
+        Iterator end() {                 // 获取结束缓存迭代器
             return m_buffers.end();
         }
         
@@ -134,7 +134,7 @@ namespace everest
             return true;
         }
         
-        Buffer & front() {                 // 首个缓存
+        Buffer & front() {               // 首个缓存
             return m_buffers.front();
         }
     }; // end of class Basic_Buffer_Sequence

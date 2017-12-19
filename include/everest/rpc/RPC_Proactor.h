@@ -7,89 +7,12 @@
 #include <unordered_map>
 #include <functional>
 
+#include <everest/rpc/RPC_Message.h>
+
 namespace everest 
 {
 namespace rpc 
-{   
-    class RPC_Message 
-    {
-    public:
-        static const size_t Header_Length = 24;
-        
-        // Message Type
-        static const char   Type_Request  = 0;
-        
-        // Message field index
-        static const size_t Idx_Length = 8;
-        
-        // byte endian
-        static const char   Little_Endian = 0;
-        static const char   Big_Endian = 1; 
-        
-    public:
-        typedef Mutable_Buffer_Sequence Buffer_Sequence;
-        
-    private:
-        Buffer_Sequence *m_buffer_seq;
-        
-    public:
-        RPC_Message () : m_buffer_seq(nullptr) {}
-  
-        RPC_Message(Mutable_Buffer_Sequence &buffers) 
-        {
-            m_buffer_seq = &buffers;
-        }
-        
-        ~RPC_Message() {}
-        
-        bool init_header();
-        bool update_header();
-        bool add_buffer(Mutable_Byte_Buffer & buf);    
-        
-        Buffer_Sequence &buffers() { return *m_buffer_seq; }
-    }; // end of class RPC_Message 
-    
-    bool RPC_Message::update_header()
-    {
-        uint32_t total_len = 0;
-        Buffer_Sequence::Iterator it = m_buffer_seq->begin();
-        for(; it != m_buffer_seq->end(); ++it) {
-            total_len += it->size();
-        }
-        m_buffer_seq->front().data<uint32_t>(Idx_Length) = total_len;;
-    }
-    
-    bool RPC_Message::add_buffer(Mutable_Byte_Buffer & buf) {
-        m_buffer_seq->push_back(buf);
-        return true;
-    }
-    
-    bool RPC_Message::init_header() {
-        Buffer_Sequence::Iterator it = m_buffer_seq->begin();
-        if ( it == m_buffer_seq->end() ) {
-            printf("[ERROR] RPC_Message::init_header, no buffer\n");
-            return false;
-        }
-        Mutable_Byte_Buffer &buf = *it;
-        bool isok = buf.size(Header_Length);
-        if ( !isok ) {
-            printf("[ERROR] RPC_Message::init_header, no enough space\n");
-            return false;
-        }
-        
-        // magic
-        buf[0] = 'G'; buf[1] = 'I'; buf[2] = 'O'; buf[3] = 'P';
-        // version
-        buf[4] = '0'; buf[5] = '0';  
-        // flags/byte order and message type 
-        buf[6] = Little_Endian; buf[7] = Type_Request;
-        // length
-        buf.data<uint32_t>(8) = 0;
-        
-        return true;
-    } // end of RPC_Message::init_header
-    
-    
+{
     /**
      * 超时队列
      */
@@ -107,8 +30,8 @@ namespace rpc
             RPC_Message m_msg;
             
         public:
-            Task(TaskOwner *owner, int type, int64_t exp) 
-                : m_owner_ref(owner), m_type(type), m_expire_time(exp) {}
+            Task(TaskOwner *owner, int type, RPC_Message& msg, int64_t exp) 
+                : m_owner_ref(owner), m_type(type), m_expire_time(exp), m_msg(msg) {}
         
             int64_t expire_time() const {  return m_expire_time; }
             
@@ -226,10 +149,10 @@ namespace rpc
             }
         }
         
-        Task * push_task(TaskOwner * owner, int type, int64_t expire) 
+        Task * push_task(TaskOwner * owner, int type, RPC_Message &msg, int64_t expire) 
         {
             // 先写入owner任务队列
-            Task * p_task = owner->push_task(Task(owner, type, expire));
+            Task * p_task = owner->push_task(Task(owner, type, msg, expire));
             if ( !p_task ) {
                 printf("[ERROR] RPC_TaskTimeoutQueue::push_task, push task fail\n");
                 return nullptr;
@@ -265,8 +188,10 @@ namespace rpc
     private:
         Poller               m_poller;
         RPC_TaskTimeoutQueue m_task_timeout_queue;   // 任务超时队列
+        
         std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
         std::function<int (RPC_SocketChannel*, int ec)> m_connect_handler;  // channel连接成功处理
+        std::function<int (RPC_SocketChannel*, RPC_Message &, int ec)> m_sent_handler;  // 发送成功回调
         
         std::vector<struct iovec> m_send_iovec;
         
@@ -296,9 +221,9 @@ namespace rpc
             return true;
         }
 
-        bool add_read(RPC_SocketObject *sockobj, int64_t expire);
+        bool add_read(RPC_SocketObject *sockobj, RPC_Message &msg, int64_t expire);
         
-        bool add_write(RPC_SocketObject *sockobj, int64_t expire);
+        bool add_write(RPC_SocketObject *sockobj, RPC_Message &msg, int64_t expire);
 
         int run_once() {
             int64_t now = DateTime::get_timestamp();
@@ -475,7 +400,18 @@ namespace rpc
         
         ssize_t ret = pch->get_socket().send(m_send_iovec);
         if ( ret > 0 ) {
-            printf("[ERROR] RPC_Proactor::on_writable, % bytes sent\n", ret);
+            printf("[TRACE] RPC_Proactor::on_writable, %ld bytes sent\n", ret);
+            if ( ret >= total_size ) {
+                printf("[TRACE] RPC_Proactor::on_writable send ok not impl\n");
+                int r = this->m_sent_handler(pch, r_msg, RPC_Constants::Ok);
+                if ( r == RPC_Constants::Ok ) {
+                    printf("[ERROR] RPC_Proactor::on_writable send ok handler return not impl\n");
+                }
+                // todo: remove from proactor
+                printf("[ERROR] RPC_Proactor::on_writable remove from proactor not impl\n");
+            } else {
+                printf("[ERROR] RPC_Proactor::on_writable send part not impl\n");
+            }
         } else if ( ret == 0 ) {
             printf("[ERROR] RPC_Proactor::on_writable, no byte sent\n");
         } else { // ret < 0
@@ -492,12 +428,12 @@ namespace rpc
     
     template<class Poller>
     inline 
-    bool RPC_Proactor<Poller>::add_read(RPC_SocketObject *sockobj, int64_t expire)
+    bool RPC_Proactor<Poller>::add_read(RPC_SocketObject *sockobj, RPC_Message& msg, int64_t expire)
     {
         RPC_TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
         assert(p_owner);
         
-        bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Read, expire); 
+        bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Read, msg, expire); 
         assert( isok );
         
         printf("[TRACE] RPC_Proactor::add_read(sockobj), expire %lld\n", expire);
@@ -519,12 +455,12 @@ namespace rpc
     
     template<class Poller>
     inline 
-    bool RPC_Proactor<Poller>::add_write(RPC_SocketObject *sockobj, int64_t expire)
+    bool RPC_Proactor<Poller>::add_write(RPC_SocketObject *sockobj, RPC_Message &msg, int64_t expire)
     {
         RPC_TaskTimeoutQueue::TaskOwner * p_owner = m_task_timeout_queue.find_owner(sockobj);
         assert(p_owner);
             
-        bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Write, expire); 
+        bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Write, msg, expire); 
         assert( isok );
             
         printf("[TRACE] RPC_Proactor::add_write(sockobj), expire %lld\n", expire);
@@ -542,7 +478,6 @@ namespace rpc
         
         return isok;
     } // end if RPC_Proactor::add_write
-    
     
 } // end of namespace rpc 
 } // end of namespace everest 

@@ -271,13 +271,13 @@ namespace rpc {
             
             if ( task.task_type == Task_Async_Accept) {
                 printf("[TRACE] RPC_Service::run, new accept task\n");
-                m_proactor.add_read(task.p_listener, task.expire_time);
+                m_proactor.add_read(task.p_listener, task.message, task.expire_time);
             } else if (task.task_type == Task_Async_Read) {
                 printf("[TRACE] RPC_Service::run, new read task\n");
-                m_proactor.add_read(task.p_channel, task.expire_time);
+                m_proactor.add_read(task.p_channel, task.message, task.expire_time);
             } else if (task.task_type == Task_Async_Write ) {
                 printf("[TRACE] RPC_Service::run, new write task\n");
-                m_proactor.add_write(task.p_channel, task.expire_time);
+                m_proactor.add_write(task.p_channel, task.message, task.expire_time);
             } else if (task.task_type == Task_Async_Add)  {
                 printf("[TRACE] RPC_Service::run, new add task %d\n", task.task_type);
                 if ( task.p_channel != nullptr ) m_proactor.reg(task.p_channel);
