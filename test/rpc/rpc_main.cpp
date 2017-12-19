@@ -109,7 +109,7 @@ public:
             if ( !isok ) {
                 printf("[ERROR] Test ServerAcceptHandler add channel error, %p, %p, %d\n", p_listener, p_channel, ec);
                 return rpc::RPC_Constants::Fail;
-            } 
+            }
             
             everest::Mutable_Byte_Buffer buf(new char[1024], 1024);
             everest::Mutable_Buffer_Sequence * seq = new everest::Mutable_Buffer_Sequence();
@@ -180,10 +180,25 @@ public:
     }
 };
 
+class ClientSendHandler
+{
+    rpc::RPC_Service<> &m_service;
+public:
+    ClientSendHandler(rpc::RPC_Service<> &service)
+        : m_service(service) {}
+
+    int operator()(rpc::RPC_SocketChannel *p_channel, rpc::RPC_Message &msg, int ec) {
+        printf("[ERROR] Test ClientSentHandler %d\n", ec);
+        return rpc::RPC_Constants::Ok;
+    }
+};
+
 void * run_client(void *)
 {
     rpc::RPC_Service<> client;
     client.set_conn_handler(ClientConnectHandler(client));
+    client.set_send_handler(ClientSendHandler(client));
+    
     bool isok = client.open_channel(RPC_LOCAL_ENDPOINT, 3000);
     
     for(int i = 0; i < 2; ++i) {

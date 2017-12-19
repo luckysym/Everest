@@ -100,12 +100,26 @@ namespace rpc
             }
         };
         
+        class SendHandler 
+        {
+            std::function<int (ChannelPtr, RPC_Message&, int)> &m_rhandler;
+        public:
+            SendHandler(std::function<int (ChannelPtr, RPC_Message&, int)> &handler)
+                : m_rhandler(handler) {}
+                
+            int operator()(ChannelPtr p_channel, RPC_Message &msg, int ec) {
+                printf("[TRACE] RPC_Service::SendHandler()\n");
+                return this->m_rhandler(p_channel, msg, ec);
+            }
+        };
+        
     private:
         AsyncTaskQueue m_async_task_queue;
         ProactorType   m_proactor;
         
         std::function<int (ListenerPtr, ChannelPtr, int)> m_accept_handler;
         std::function<int (ChannelPtr, int)> m_connect_handler;
+        std::function<int (ChannelPtr, RPC_Message&, int)> m_send_handler;
         
     private:
         RPC_Service(const RPC_Service&) = delete;
@@ -122,7 +136,7 @@ namespace rpc
         void        set_recv_handler(const RecvHandler &handler);
         
         template<class SendHandler>
-        void        set_send_handler(const SendHandler &handler);
+        void        set_send_handler(const SendHandler &handler) { m_send_handler = handler; }
         
         template<class AcceptHandler>
         void        set_accept_handler(const AcceptHandler &handler) { m_accept_handler = handler; }
@@ -152,6 +166,7 @@ namespace rpc {
     RPC_Service<Impl>::RPC_Service() {
         m_proactor.set_accept_handler(AcceptHandler(m_accept_handler));
         m_proactor.set_connect_handler(ConnectHandler(m_connect_handler));
+        m_proactor.set_send_handler(SendHandler(m_send_handler));
     }
     
     template<class Impl>

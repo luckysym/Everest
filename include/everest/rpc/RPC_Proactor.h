@@ -191,7 +191,7 @@ namespace rpc
         
         std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
         std::function<int (RPC_SocketChannel*, int ec)> m_connect_handler;  // channel连接成功处理
-        std::function<int (RPC_SocketChannel*, RPC_Message &, int ec)> m_sent_handler;  // 发送成功回调
+        std::function<int (RPC_SocketChannel*, RPC_Message &, int ec)> m_send_handler;  // 发送成功回调
         
         std::vector<struct iovec> m_send_iovec;
         
@@ -206,6 +206,9 @@ namespace rpc
         
         template<class Handler>
         void set_connect_handler(const Handler &handler) { m_connect_handler = handler; }
+    
+        template<class Handler>
+        void set_send_handler(const Handler &handler) { m_send_handler = handler; }
     
         bool reg(RPC_SocketObject *sockobj) 
         {
@@ -403,7 +406,7 @@ namespace rpc
             printf("[TRACE] RPC_Proactor::on_writable, %ld bytes sent\n", ret);
             if ( ret >= total_size ) {
                 printf("[TRACE] RPC_Proactor::on_writable send ok not impl\n");
-                int r = this->m_sent_handler(pch, r_msg, RPC_Constants::Ok);
+                int r = this->m_send_handler(pch, r_msg, RPC_Constants::Ok);
                 if ( r == RPC_Constants::Ok ) {
                     printf("[ERROR] RPC_Proactor::on_writable send ok handler return not impl\n");
                 }
