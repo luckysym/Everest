@@ -8,8 +8,7 @@
 namespace everest 
 {
 namespace rpc 
-{   
-
+{
     class RPC_Message 
     {
     public:
@@ -23,7 +22,7 @@ namespace rpc
         
         // byte endian
         static const char   Little_Endian = 0;
-        static const char   Big_Endian = 1; 
+        static const char   Big_Endian    = 1; 
         
     public:
         typedef Mutable_Buffer_Sequence Buffer_Sequence;

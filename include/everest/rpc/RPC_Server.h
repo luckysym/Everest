@@ -113,13 +113,27 @@ namespace rpc
             }
         };
         
+        class RecvHandler 
+        {
+            std::function<int (ChannelPtr, RPC_Message&, int)> &m_rhandler;
+        public:
+            RecvHandler(std::function<int (ChannelPtr, RPC_Message&, int)> &handler)
+                : m_rhandler(handler) {}
+                
+            int operator()(ChannelPtr p_channel, RPC_Message &msg, int ec) {
+                printf("[TRACE] RPC_Service::RecvHandler()\n");
+                return this->m_rhandler(p_channel, msg, ec);
+            }
+        };
+        
     private:
         AsyncTaskQueue m_async_task_queue;
         ProactorType   m_proactor;
         
-        std::function<int (ListenerPtr, ChannelPtr, int)> m_accept_handler;
-        std::function<int (ChannelPtr, int)> m_connect_handler;
+        std::function<int (ListenerPtr, ChannelPtr, int)>  m_accept_handler;
+        std::function<int (ChannelPtr, int)>               m_connect_handler;
         std::function<int (ChannelPtr, RPC_Message&, int)> m_send_handler;
+        std::function<int (ChannelPtr, RPC_Message&, int)> m_recv_handler;
         
     private:
         RPC_Service(const RPC_Service&) = delete;
@@ -133,7 +147,7 @@ namespace rpc
         void        set_conn_handler(const ConnHandler &handler) { m_connect_handler = handler; }
         
         template<class RecvHandler>
-        void        set_recv_handler(const RecvHandler &handler);
+        void        set_recv_handler(const RecvHandler &handler) { m_recv_handler = handler; }
         
         template<class SendHandler>
         void        set_send_handler(const SendHandler &handler) { m_send_handler = handler; }
@@ -167,6 +181,7 @@ namespace rpc {
         m_proactor.set_accept_handler(AcceptHandler(m_accept_handler));
         m_proactor.set_connect_handler(ConnectHandler(m_connect_handler));
         m_proactor.set_send_handler(SendHandler(m_send_handler));
+        m_proactor.set_recv_handler(RecvHandler(m_recv_handler));
     }
     
     template<class Impl>

@@ -112,6 +112,7 @@ public:
             }
             
             everest::Mutable_Byte_Buffer buf(new char[1024], 1024);
+            buf.limit(24);
             everest::Mutable_Buffer_Sequence * seq = new everest::Mutable_Buffer_Sequence();
             seq->push_back(buf);
             isok = m_service.post_receive(p_channel, rpc::RPC_Message(*seq), 5000);
@@ -121,11 +122,22 @@ public:
                 printf("[ERROR] Test ServerAcceptHandler channel async read failed, %p, %p, %d\n", p_listener, p_channel, ec);
                 return rpc::RPC_Constants::Fail;
             }
-            
         } else {
             printf("[ERROR] Test ServerAcceptHandler fail, %p, %p, %d\n", p_listener, p_channel, ec);
             return rpc::RPC_Constants::Fail;
         }
+    }
+};
+
+class ServerRecvHandler 
+{
+    rpc::RPC_Service<> &m_service;
+public:
+    ServerRecvHandler(rpc::RPC_Service<> &service) : m_service(service) {}
+    
+    int operator()(rpc::RPC_SocketChannel *p_channel, rpc::RPC_Message &msg, int ec) {
+        printf("[ERROR] Test ServerRecvHandler not impl, %p, %p, %d\n", p_channel, p_channel, ec);
+        return rpc::RPC_Constants::Fail;
     }
 };
 
@@ -134,6 +146,7 @@ void * run_server(void *)
     rpc::RPC_Service<> server;
     
     server.set_accept_handler(ServerAcceptHandler(server));
+    server.set_recv_handler(ServerRecvHandler(server));
     
     rpc::RPC_Service<>::ListenerPtr ptrListener= server.open_listener(RPC_LOCAL_ENDPOINT);
     if ( !ptrListener ) { throw std::runtime_error("open listener failed"); } 
@@ -141,10 +154,13 @@ void * run_server(void *)
     bool isok = server.post_accept(ptrListener, 5000);
     if ( !isok ) { throw std::runtime_error("post accept failed");}
     
-    int result = server.run_once();
-    if ( result < 0 ) { throw std::runtime_error("server run failed");}
+    for(int i = 0; i < 2; ++i) {
+        int ret = server.run_once();
+        printf("Server Run Once %d\n", ret);
+        if ( ret < 0 ) break;
+    }
     
-    printf("Server Exit, result %d\n", result);
+    printf("Server Exit\n");
     return nullptr;
 }
 

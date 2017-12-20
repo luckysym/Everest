@@ -61,6 +61,7 @@ namespace net
         bool accept(Socket &sock, SocketAddress &addr);
         
         ssize_t send(std::vector<struct iovec> &buffers);
+        ssize_t receive(std::vector<struct iovec> &buffers);
         
         bool set_block_mode(bool blocked);
         bool set_reuse_addr(bool reuse);
@@ -187,6 +188,22 @@ namespace net
     
         ssize_t ret = ::sendmsg(m_fd, &msg, 0);
         printf("[TRACE] Socket::send, iovec\n");
+        return ret;
+    }
+    
+    ssize_t Socket::receive(std::vector<struct iovec> &buffers)
+    {
+        struct msghdr msg;
+        msg.msg_name = nullptr;
+        msg.msg_namelen = 0;
+        msg.msg_iov = &buffers[0];
+        msg.msg_iovlen = buffers.size();
+        msg.msg_control = nullptr;
+        msg.msg_controllen = 0;
+        msg.msg_flags = 0;
+    
+        ssize_t ret = ::recvmsg(m_fd, &msg, 0);
+        printf("[TRACE] Socket::receive, iovec\n");
         return ret;
     }
     

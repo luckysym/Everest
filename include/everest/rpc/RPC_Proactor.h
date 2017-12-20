@@ -192,14 +192,16 @@ namespace rpc
         std::function<int (RPC_SocketListener*, RPC_SocketChannel*, int ec)> m_accept_handler;
         std::function<int (RPC_SocketChannel*, int ec)> m_connect_handler;  // channel连接成功处理
         std::function<int (RPC_SocketChannel*, RPC_Message &, int ec)> m_send_handler;  // 发送成功回调
+        std::function<int (RPC_SocketChannel*, RPC_Message &, int ec)> m_recv_handler;  // 接收成功回调
         
         std::vector<struct iovec> m_send_iovec;
+        std::vector<struct iovec> m_recv_iovec;
         
     public:
         RPC_Proactor() {
             m_send_iovec.reserve(16);
+            m_recv_iovec.reserve(16);
         }
-        
         
         template<class Handler>
         void set_accept_handler(const Handler &handler) { m_accept_handler = handler; }
@@ -209,6 +211,9 @@ namespace rpc
     
         template<class Handler>
         void set_send_handler(const Handler &handler) { m_send_handler = handler; }
+        
+        template<class Handler>
+        void set_recv_handler(const Handler &handler) { m_recv_handler = handler; }
     
         bool reg(RPC_SocketObject *sockobj) 
         {
@@ -259,6 +264,19 @@ namespace rpc
         }
         
     private:
+        size_t prepare_recv_iovec(RPC_Message::Buffer_Sequence & bufseq) 
+        {
+            RPC_Message::Buffer_Sequence::Iterator it = bufseq.latest();
+            size_t total_size = 0;
+            for( ; it != bufseq.end(); ++it ) {
+                size_t s = it->limit() - it->size();
+                total_size += s;
+                m_recv_iovec.push_back(iovec{it->ptr<>(it->size()) ,s});
+            }
+            
+            return total_size;
+        }
+    
         int on_acceptable(RPC_SocketListener * plistener) 
         {
             RPC_SocketChannel * p_channel = plistener->accept();
@@ -282,10 +300,7 @@ namespace rpc
             return RPC_Constants::Ok;
         }
         
-        int on_readable(RPC_SocketChannel *pchannel) {
-            printf("[ERROR] RPC_Proactor::on_readable, poller wait error\n");
-            return RPC_Constants::Ok;
-        }
+        int on_readable(RPC_SocketChannel *pchannel, RPC_TaskTimeoutQueue::Task *p_task);
         
         int on_writable(RPC_SocketChannel *pch, RPC_TaskTimeoutQueue::Task *p_task);
         
@@ -319,12 +334,23 @@ namespace rpc
                             throw std::runtime_error("RPC_Proactor::run, Listener unknown callback returned value");
                         }
                     } else if ( p_sock->type() == RPC_SocketObject::Type_Channel ) {
-                        int ret = this->on_readable((RPC_SocketChannel*)p_sock);
-                        if ( ret == RPC_Constants::Ok ) {
-                            // TODO 接下去怎么做
-                            printf("[ERROR] RPC_Proactor::process_events, channel get Finish\n" );
+                        auto p_task = p_owner->get_front_task(RPC_Constants::Read);
+                        if ( p_task ) {
+                            int r = this->on_readable((RPC_SocketChannel*)p_sock, p_task);
+                            if ( r == RPC_Constants::Ok ) {
+                                // TODO 接下去怎么做
+                                printf("[ERROR] RPC_Proactor::process_events, channel read get Finish\n" );
+                            } else if ( r == RPC_Constants::Continue) {
+                                printf("[ERROR] RPC_Proactor::process_events, channel read continue\n" );
+                            } else if ( r == RPC_Constants::Fail ) {
+                                printf("[ERROR] RPC_Proactor::process_events, channel read fail\n" );
+                            } else {
+                                char msg[128];
+                                snprintf(msg, 128, "RPC_Proactor::run, Channel unknown callback returned value %d, %d", r, RPC_Constants::Ok  );
+                                throw std::runtime_error(msg);
+                            }
                         } else {
-                            throw std::runtime_error("RPC_Proactor::run, Channel unknown callback returned value");
+                            throw std::runtime_error("RPC_Proactor::run, no read task");
                         }
                     } else {
                         char buf[128];
@@ -374,6 +400,66 @@ namespace rpc
     
     template<class Poller>
     inline 
+    int RPC_Proactor<Poller>::on_readable(
+        RPC_SocketChannel *pch, RPC_TaskTimeoutQueue::Task *p_task) 
+    {
+        printf("[TRACE] RPC_Proactor<Poller>::on_readable\n");
+        RPC_Message &r_msg = p_task->message();
+        RPC_Message::Buffer_Sequence &r_bufseq = r_msg.buffers();
+        Mutable_Buffer_Sequence::Iterator it = r_bufseq.latest();
+        if ( it == r_bufseq.end() ) {
+            throw std::runtime_error("RPC_Proactor<Poller>::on_readable, no buffer");
+        }
+        
+        // 准备接收缓存
+        size_t total_size = this->prepare_recv_iovec(r_bufseq);  // buf seq to recv_iovec
+        size_t remain_size = total_size;
+        
+        while (remain_size) {
+            ssize_t ret = pch->get_socket().receive(m_recv_iovec);  // 接收数据
+            if ( ret > 0 ) {
+                remain_size -= ret;
+                // 成功接收到，提交缓存，
+                printf("[TRACE] RPC_Proactor<Poller>::on_readable, received %ld\n", ret);
+                r_bufseq.write_submit(ret);
+                if ( remain_size == 0 ) {
+                    int r = this->m_recv_handler(pch, r_msg, 0);
+                    if ( r == RPC_Constants::Continue ) {  // 继续收
+                        // 消息接收未完成，比如只接收到消息头，根据消息头再分配消息体内存后，再继续接收
+                        remain_size =  this->prepare_recv_iovec(r_bufseq);
+                        total_size += remain_size;
+                    } else if ( r == RPC_Constants::Ok ) {
+                        // 消息接收完成
+                        return RPC_Constants::Ok;
+                    } else if ( r == RPC_Constants::Fail) {
+                        printf("[TRACE] RPC_Proactor<Poller>::on_readable, recv handler returns %d\n", r);
+                        return RPC_Constants::Fail;
+                    } else {
+                        return r;
+                    }
+                } else {
+                    // 没有接收完成，重新准备
+                    this->prepare_recv_iovec(r_bufseq);
+                }
+            } else if ( ret == 0 ) {
+                // 连接断开
+                printf("[ERROR] RPC_Proactor<Poller>::on_readable, connect reset by remote\n");
+                return RPC_Constants::Fail;
+            } else {
+                if ( errno == EAGAIN ) {
+                    printf("[TRACE] RPC_Proactor<Poller>::on_readable, no more meessge to recv, wait\n");
+                    return RPC_Constants::Continue;
+                } else {
+                    printf("[ERROR] RPC_Proactor<Poller>::on_readable, connect reset by remote\n");
+                    return RPC_Constants::Fail;
+                }
+            }
+        } // end while 
+        return RPC_Constants::Ok;
+    } // end of RPC_Proactor<Poller>::on_readable
+    
+    template<class Poller>
+    inline 
     int RPC_Proactor<Poller>::on_writable(
         RPC_SocketChannel *pch, RPC_TaskTimeoutQueue::Task *p_task) 
     {
@@ -409,6 +495,7 @@ namespace rpc
                 int r = this->m_send_handler(pch, r_msg, RPC_Constants::Ok);
                 if ( r == RPC_Constants::Ok ) {
                     printf("[ERROR] RPC_Proactor::on_writable send ok handler return not impl\n");
+                    // todo: move latest buffer to end
                 }
                 // todo: remove from proactor
                 printf("[ERROR] RPC_Proactor::on_writable remove from proactor not impl\n");
@@ -465,13 +552,13 @@ namespace rpc
             
         bool isok = m_task_timeout_queue.push_task(p_owner, RPC_Constants::Write, msg, expire); 
         assert( isok );
-            
+        
         printf("[TRACE] RPC_Proactor::add_write(sockobj), expire %lld\n", expire);
             
         int events = 0;
         if ( p_owner->get_front_task(RPC_Constants::Read ) != nullptr ) events |= Poller::Event_Read;
         if ( p_owner->get_front_task(RPC_Constants::Write ) != nullptr ) events |= Poller::Event_Write;
-            
+        
         printf("[TRACE] RPC_Proactor::add_write, poller set, event %d\n", events);
         isok = m_poller.set(sockobj->get_socket().handle(), events, p_owner);
         if ( !isok ) {

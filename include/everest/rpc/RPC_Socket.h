@@ -14,8 +14,9 @@ namespace rpc
      */
     struct RPC_Constants
     {
-        static const int Ok     = 0;
-        static const int Fail   = -1;
+        static const int Fail     = -1;
+        static const int Ok       = 0;
+        static const int Continue = 1;
         
         static const int Read   = 1;
         static const int Write  = 2;

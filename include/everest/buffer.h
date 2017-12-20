@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include <list>
+#include <stdexcept>
 
 namespace everest 
 {
@@ -45,6 +46,7 @@ namespace everest
         size_t size() const { return m_size; }
         
         bool   size(size_t newsize) {
+            printf("[TRACE] Mutable_Buffer::size(s), new %ld, old %ld\n", newsize, m_size);
             if ( newsize <= m_limit ) {
                 m_size = newsize;
                 return true; 
@@ -92,17 +94,17 @@ namespace everest
         
     private:
         SequenceType m_buffers;
-        Iterator     m_it_latest;
+        Iterator     m_it_cursor;
         
     public:
         Basic_Buffer_Sequence() {
-            m_it_latest = m_buffers.end();
+            m_it_cursor = m_buffers.end();
         }
     
         bool push_back(const Buffer &buf) {    // 追加一个缓存
             m_buffers.push_back(buf);
-            if ( m_it_latest == m_buffers.end() ) {
-                m_it_latest = (--m_buffers.end());
+            if ( m_it_cursor == m_buffers.end() ) {
+                m_it_cursor = (--m_buffers.end());
             }
             return true;
         }
@@ -126,16 +128,37 @@ namespace everest
         
         Iterator latest() {              // 最近一次写入的缓存 
             // m_it_latest = m_buffers.end();
-            return m_it_latest;
-        }
-        
-        bool latest(Iterator &it) {      // 设置最近一次读取或写入的缓存
-            m_it_latest = it;
-            return true;
+            return m_it_cursor;
         }
         
         Buffer & front() {               // 首个缓存
             return m_buffers.front();
+        }
+        
+        // 缓存中有效数据后移n个元素。一般用于向缓存中写入数据后确认。
+        bool write_submit(size_t n) {  
+            if ( n > 0 && m_it_cursor == m_buffers.end() ) {
+                throw std::runtime_error("Buffer_Sequence::submit");
+            }
+            while (n > 0) {
+                size_t limit = m_it_cursor->limit();
+                size_t size  = m_it_cursor->size();
+                size_t len = limit - size;
+                printf("[TRACE] Buffer_Sequence::write_submit, %ld, %ld, %ld, %ld\n", n, len, limit, size);
+                if ( n <= len ) {
+                    m_it_cursor->size( size + n ); 
+                    n = 0;
+                } else {
+                    m_it_cursor->size(limit);
+                    n -= len;
+                    ++m_it_cursor;
+                    if ( n > 0 && m_it_cursor == m_buffers.end() ) {
+                        char msg[128];
+                        snprintf(msg, 128, "Buffer_Sequence::write_submit, %ld, %ld, %ld, %ld", n, len, limit, size);
+                        throw std::runtime_error(msg);
+                    }
+                }
+            }
         }
     }; // end of class Basic_Buffer_Sequence
     
