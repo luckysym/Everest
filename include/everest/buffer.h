@@ -33,6 +33,14 @@ namespace everest
             printf("[TRACE] Basic_Mutable_Buffer init\n");
         }
         
+        void detach() {
+            m_capacity = 0;
+            m_limit = 0;
+            m_size = 0;
+            m_pos = 0;
+            m_buffer = nullptr;
+        }
+        
         size_t capacity() const { return m_capacity; }
         
         size_t limit() const { return m_limit; }
@@ -61,23 +69,19 @@ namespace everest
             return true;
         }
         
-        template<class D = T>
-        D * ptr() { return m_buffer; }
+        T * ptr() { return m_buffer; }
         
-        template<class D = T>
-        const D * ptr() const { return m_buffer; }
+        const T * ptr() const { return m_buffer; }
         
-        template<class D = T>
-        D * ptr(size_t offset) { return (D *)(m_buffer + offset); }
+        T * ptr(size_t offset) { return (m_buffer + offset); }
         
-        template<class D = T>
-        const D * ptr(size_t offset) const { return (const D *)(m_buffer + offset); }
+        const T * ptr(size_t offset) const { return (m_buffer + offset); }
 
         template<class D>
         D & data(size_t offset) { return *(D *)(m_buffer + offset); }
         
         template<class D>
-        const D & data(size_t offset) const { return *(const D *)(m_buffer + offset); }
+        const D & data(size_t offset) const { return *(m_buffer + offset); }
         
         T & operator[](size_t offset) { return m_buffer[offset]; }
         
@@ -96,8 +100,23 @@ namespace everest
         SequenceType m_buffers;
         Iterator     m_it_cursor;
         
+        Basic_Buffer_Sequence(const Basic_Buffer_Sequence&);
+        Basic_Buffer_Sequence& operator=(const Basic_Buffer_Sequence&);
+        
     public:
         Basic_Buffer_Sequence() {
+            m_it_cursor = m_buffers.end();
+        }
+        
+        size_t size() const { // 获取缓存总大小
+            size_t s = 0;
+            typename SequenceType::const_iterator it = m_buffers.begin();
+            for(; it != m_buffers.end(); ++it ) s += it->size();
+            return s;
+        }
+        
+        void clear() {
+            m_buffers.clear();
             m_it_cursor = m_buffers.end();
         }
     
@@ -110,11 +129,11 @@ namespace everest
         }
         
         bool pop_front() {               // 删除前部一个缓存
-            //if ( !m_buffers.empty() ) {
-            //    if ( m_it_latest == m_buffers.begin() ) 
-            //        ++m_it_latest;
-            //    m_buffers.pop_front();
-            //}
+            if ( !m_buffers.empty() ) {
+                if ( m_it_cursor == m_buffers.begin() ) 
+                    ++m_it_cursor;
+                m_buffers.pop_front();
+            }
             return true;
         }
         
@@ -145,7 +164,7 @@ namespace everest
                 size_t size  = m_it_cursor->size();
                 size_t len = limit - size;
                 printf("[TRACE] Buffer_Sequence::write_submit, %ld, %ld, %ld, %ld\n", n, len, limit, size);
-                if ( n <= len ) {
+                if ( n < len ) {
                     m_it_cursor->size( size + n ); 
                     n = 0;
                 } else {

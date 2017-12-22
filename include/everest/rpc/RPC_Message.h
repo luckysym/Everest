@@ -42,10 +42,34 @@ namespace rpc
         
         bool init_header();
         bool update_header();
-        bool add_buffer(Mutable_Byte_Buffer & buf);    
+        bool add_buffer(Mutable_Byte_Buffer & buf); 
         
+        size_t size() const ;  // 获取消息长度
+        
+        Buffer_Sequence * detach_buffers();
         Buffer_Sequence &buffers() { return *m_buffer_seq; }
     }; // end of class RPC_Message 
+    
+    RPC_Message::Buffer_Sequence * RPC_Message::detach_buffers()
+    {
+        auto p = m_buffer_seq;
+        m_buffer_seq = nullptr;
+        return p;
+    }
+    
+    size_t RPC_Message::size() const 
+    {
+        Buffer_Sequence::Iterator it = m_buffer_seq->begin();
+        if ( it == m_buffer_seq->end() ) {
+            printf("[ERROR] RPC_Message::size, no buffer\n");
+            throw std::runtime_error("RPC_Message::size, no buffer");
+        }
+        if ( it->size() < Header_Length) {
+            printf("[ERROR] RPC_Message::size, message is too short\n");
+            throw std::runtime_error("RPC_Message::size, message is too short");
+        }
+        return (size_t)it->data<uint32_t>(Idx_Length);
+    } // end of RPC_Message::size()
     
     bool RPC_Message::update_header()
     {
@@ -54,7 +78,7 @@ namespace rpc
         for(; it != m_buffer_seq->end(); ++it) {
             total_len += it->size();
         }
-        m_buffer_seq->front().data<uint32_t>(Idx_Length) = total_len;;
+        m_buffer_seq->front().data<uint32_t>(Idx_Length) = total_len;
     }
     
     bool RPC_Message::add_buffer(Mutable_Byte_Buffer & buf) {

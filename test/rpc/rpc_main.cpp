@@ -136,7 +136,52 @@ public:
     ServerRecvHandler(rpc::RPC_Service<> &service) : m_service(service) {}
     
     int operator()(rpc::RPC_SocketChannel *p_channel, rpc::RPC_Message &msg, int ec) {
-        printf("[ERROR] Test ServerRecvHandler not impl, %p, %p, %d\n", p_channel, p_channel, ec);
+        auto & buffers = msg.buffers();
+        size_t buf_size = buffers.size();
+        size_t msg_size = msg.size();
+        
+        if ( buf_size < msg_size ) {
+            printf("[TRACE] Test ServerRecvHandler, part message,  msg %lu, buf %lu\n", msg_size, buf_size);
+            auto iter = buffers.latest();
+            if ( iter->capacity() >= msg_size ) {
+                iter->limit(msg_size);  // 在当前缓存上扩展
+            } else {
+                // 缓存不足，需要增加一个缓存
+                everest::Mutable_Byte_Buffer buf(new char[msg_size - buf_size], msg_size - buf_size);
+                buffers.push_back(buf);
+            }
+            printf("[TRACE] Test ServerRecvHandler, new buffer add, continue\n");
+            return rpc::RPC_Constants::Continue;
+        } else {
+            printf("[TRACE] Test ServerRecvHandler, full message,  msg %lu, buf %lu\n", msg_size, buf_size);
+            // 清理消息中的缓存
+            auto iter = buffers.begin();
+            for ( ; iter != buffers.end(); ++iter ) {
+                char * p = iter->ptr();
+                iter->detach();
+                delete[] p;
+            }
+            buffers.clear();
+            auto p_buffers = msg.detach_buffers();
+            
+            // 生成回复
+            p_buffers->push_back(everest::Mutable_Byte_Buffer(new char[64], 64));
+            auto & buf = p_buffers->front();
+            rpc::RPC_Message newmsg(*p_buffers);
+            newmsg.init_header();
+            strcpy(buf.ptr(rpc::RPC_Message::Header_Length), "hello response");
+            buf.size(buf.size() + strlen("hello response"));
+            newmsg.update_header();
+            
+            // 发送回复
+            bool send_ok = m_service.post_send(p_channel, newmsg, 5000);
+            if ( !send_ok ) {
+                printf("[ERROR] Test ServerRecvHandler, send fail\n");
+                return rpc::RPC_Constants::Fail;
+            } 
+            printf("[INFO] Test ServerRecvHandler, send ok\n");
+            return rpc::RPC_Constants::Ok;
+        }
         return rpc::RPC_Constants::Fail;
     }
 };

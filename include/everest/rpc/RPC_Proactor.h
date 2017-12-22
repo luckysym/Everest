@@ -266,12 +266,13 @@ namespace rpc
     private:
         size_t prepare_recv_iovec(RPC_Message::Buffer_Sequence & bufseq) 
         {
+            printf("[TRACE] prepare_recv_iovec\n");
             RPC_Message::Buffer_Sequence::Iterator it = bufseq.latest();
             size_t total_size = 0;
             for( ; it != bufseq.end(); ++it ) {
                 size_t s = it->limit() - it->size();
                 total_size += s;
-                m_recv_iovec.push_back(iovec{it->ptr<>(it->size()) ,s});
+                m_recv_iovec.push_back(iovec{it->ptr(it->size()) ,s});
             }
             
             return total_size;
@@ -426,8 +427,13 @@ namespace rpc
                     int r = this->m_recv_handler(pch, r_msg, 0);
                     if ( r == RPC_Constants::Continue ) {  // 继续收
                         // 消息接收未完成，比如只接收到消息头，根据消息头再分配消息体内存后，再继续接收
-                        remain_size =  this->prepare_recv_iovec(r_bufseq);
-                        total_size += remain_size;
+                        try {
+                            remain_size =  this->prepare_recv_iovec(r_bufseq);
+                            total_size += remain_size;
+                            printf("[TRACE] RPC_Proactor<Poller>::on_readable, continued %ld, %ld\n", ret, remain_size);
+                        } catch (const std::exception &e) {
+                            printf("[EXCEPT] on readable coninued\n");
+                        }
                     } else if ( r == RPC_Constants::Ok ) {
                         // 消息接收完成
                         return RPC_Constants::Ok;
@@ -484,14 +490,14 @@ namespace rpc
                     m_send_iovec.size(), m_send_iovec.capacity());
                 m_send_iovec.reserve(m_send_iovec.capacity() * 2);
             }
-            m_send_iovec.push_back(iovec{it->ptr<>(it->position()), s});
+            m_send_iovec.push_back(iovec{it->ptr(it->position()), s});
         } // end for
         
         ssize_t ret = pch->get_socket().send(m_send_iovec);
         if ( ret > 0 ) {
             printf("[TRACE] RPC_Proactor::on_writable, %ld bytes sent\n", ret);
             if ( ret >= total_size ) {
-                printf("[TRACE] RPC_Proactor::on_writable send ok not impl\n");
+                printf("[TRACE] RPC_Proactor::on_writable send ok\n");
                 int r = this->m_send_handler(pch, r_msg, RPC_Constants::Ok);
                 if ( r == RPC_Constants::Ok ) {
                     printf("[ERROR] RPC_Proactor::on_writable send ok handler return not impl\n");
