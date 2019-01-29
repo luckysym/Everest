@@ -133,6 +133,10 @@ AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
+libeverest_core_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CXXLD) \
+	$(AM_CXXFLAGS) $(CXXFLAGS) $(libeverest_core_la_LDFLAGS) \
+	$(LDFLAGS) -o $@
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -379,7 +383,8 @@ SUBDIRS = . test
 ACLOCAL_AMFLAGS = -I m4
 lib_LTLIBRARIES = libeverest_core.la
 libeverest_core_la_SOURCES = src/SObject.cpp
-libeverest_core_la_CPPFLAGS = -m64 -std=c++11 -Iinclude
+libeverest_core_la_CPPFLAGS = -m64 -std=c++11 -Iinclude -g
+libeverest_core_la_LDFLAGS = -fPIC
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
@@ -479,7 +484,7 @@ src/libeverest_core_la-SObject.lo: src/$(am__dirstamp) \
 	src/$(DEPDIR)/$(am__dirstamp)
 
 libeverest_core.la: $(libeverest_core_la_OBJECTS) $(libeverest_core_la_DEPENDENCIES) $(EXTRA_libeverest_core_la_DEPENDENCIES) 
-	$(AM_V_CXXLD)$(CXXLINK) -rpath $(libdir) $(libeverest_core_la_OBJECTS) $(libeverest_core_la_LIBADD) $(LIBS)
+	$(AM_V_CXXLD)$(libeverest_core_la_LINK) -rpath $(libdir) $(libeverest_core_la_OBJECTS) $(libeverest_core_la_LIBADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)

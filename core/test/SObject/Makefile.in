@@ -488,7 +488,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign  
 test_sobj_SOURCES = sobjtest.cpp
-test_sobj_CXXFLAGS = -I../../include -m64 -std=c++11 -g
+test_sobj_CXXFLAGS = -I../../include -m64 -std=c++11 -g -O0
 test_sobj_LDFLAGS = -L../../.libs -leverest_core
 TESTS = $(check_PROGRAMS)
 all: all-am
